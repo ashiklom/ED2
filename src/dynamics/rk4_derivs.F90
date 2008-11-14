@@ -207,14 +207,14 @@ subroutine leaftw_derivs_ar(initp, dinitp, csite,ipa,isi,ipy, rhos, prss, pcpg, 
   ! surface to 1 meter below the surface.
   nsoil = csite%ntext_soil(nzg,ipa)
   initp%available_liquid_water(nzg) = dslz(nzg) * max(0.0,  &
-       initp%soil_fracliq(nzg) * (initp%soil_water(nzg) - soil(nsoil)%soilcp))
+       initp%soil_fracliq(nzg) * (real(initp%soil_water(nzg)) - soil(nsoil)%soilcp))
 
   ! initialized to zero
   initp%extracted_water(nzg) = 0.0
   do k = nzg - 1, lsl, -1
      nsoil = csite%ntext_soil(k,ipa)
      initp%available_liquid_water(k) = initp%available_liquid_water(k+1) +  &
-          dslz(k) * max(0.0, (initp%soil_water(k) - soil(nsoil)%soilcp) *  &
+          dslz(k) * max(0.0, (real(initp%soil_water(k)) - soil(nsoil)%soilcp) *  &
           initp%soil_fracliq(k))
      initp%extracted_water(k) = 0.0
   enddo
@@ -229,7 +229,7 @@ subroutine leaftw_derivs_ar(initp, dinitp, csite,ipa,isi,ipy, rhos, prss, pcpg, 
   do k = lsl, nzg
      nsoil = csite%ntext_soil(k,ipa)
      if(nsoil <= 12)then
-        wgpfrac = min(initp%soil_water(k) / soil(nsoil)%slmsts,1.0)
+        wgpfrac = min(real(initp%soil_water(k)) / soil(nsoil)%slmsts,1.0)
         soilcond = soil(nsoil)%soilcond0 + wgpfrac * (soil(nsoil)%soilcond1  &
              + wgpfrac * soil(nsoil)%soilcond2)
      else
@@ -381,7 +381,7 @@ subroutine leaftw_derivs_ar(initp, dinitp, csite,ipa,isi,ipy, rhos, prss, pcpg, 
      ! This requires multiplication of volumetric water content, m3(water)/m3
      ! must be multiplied by depth to get a depth of water.
 
-     soil_liq(k) = max(0.0, (initp%soil_water(k) - soil(nsoil)%soilcp) *  &
+     soil_liq(k) = max(0.0, (real(initp%soil_water(k)) - soil(nsoil)%soilcp) *  &
                             initp%soil_fracliq(k))
 
      soilair99(k) = 0.99 * soil(nsoil)%slmsts - initp%soil_water(k)
@@ -829,48 +829,7 @@ subroutine canopy_derivs_two_ar(initp, dinitp, csite,ipa,isi,ipy, hflxgc, wflxgc
         endif
 
 
-        ! Do evaporation/dew formation on leaf surfaces
-        if (abs(initp%veg_temp(ico)-atm_tmp) > 20.) then
-           write(unit=*,fmt='(a,1x,i5)')     '================== FATAL ERROR =================='
-           write(unit=*,fmt='(a,1x,i5)')     ' IPY:',ipy
-           write(unit=*,fmt='(a,1x,i5)')     ' ISI:',isi
-           write(unit=*,fmt='(a,1x,i5)')     ' IPA:',ipa
-           write(unit=*,fmt='(a,1x,i5)')     ' ICO:',ico
-           write(unit=*,fmt='(a,1x,f14.5)')  ' Longitude:',edgrid_g(1)%lon(ipy)
-           write(unit=*,fmt='(a,1x,f14.5)')  ' Latitude: ',edgrid_g(1)%lat(ipy)
-           write(unit=*,fmt='(a)')           ' '
-           write(unit=*,fmt='(a,1x,es14.7)') ' PRSS:     ',prss
-           write(unit=*,fmt='(a,1x,es14.7)') ' ATM_TMP:  ',atm_tmp
-           write(unit=*,fmt='(a,1x,es14.7)') ' RHOS:     ',rhos
-           write(unit=*,fmt='(a,1x,es14.7)') ' PCPG:     ',pcpg
-           write(unit=*,fmt='(a)')           ' '
-           write(unit=*,fmt='(a,1x,es14.7)') ' dvegQtot: ',dvegQtot
-           write(unit=*,fmt='(a,1x,es14.7)') ' rshort_v: ',cpatch%rshort_v(ico)
-           write(unit=*,fmt='(a,1x,es14.7)') ' rlong_v:  ',cpatch%rlong_v(ico)
-           write(unit=*,fmt='(a,1x,es14.7)') ' hflxvc:   ',hflxvc
-           write(unit=*,fmt='(a,1x,es14.7)') ' wflxvc*Lv:',wflxvc*alvl
-           write(unit=*,fmt='(a,1x,es14.7)') ' transp*Lv:',transp*alvl
-           write(unit=*,fmt='(a,1x,es14.7)') ' qwshed:   ',qwshed
-           write(unit=*,fmt='(a,1x,es14.7)') ' intercept:',heat_intercept_rate
-           write(unit=*,fmt='(a)')           ' '
-           write(unit=*,fmt='(a,1x,es14.7)') ' can_temp :',initp%can_temp
-           write(unit=*,fmt='(a,1x,es14.7)') ' can_shv  :',initp%can_shv
-           write(unit=*,fmt='(a,1x,es14.7)') ' gnd_shv  :',initp%ground_shv
-           write(unit=*,fmt='(a)')           ' '
-           write(unit=*,fmt='(a,1x,es14.7)') ' c2       :',c2
-           write(unit=*,fmt='(a,1x,es14.7)') ' rd       :',rd
-           write(unit=*,fmt='(a,1x,es14.7)') ' rasgnd   :',rasgnd
-           write(unit=*,fmt='(a,1x,es14.7)') ' rasveg   :',initp%rasveg
-           write(unit=*,fmt='(a)')           ' '
-           write(unit=*,fmt='(a,1x,es14.7)') 'Lai_coh   :',cpatch%lai(ico)
-           write(unit=*,fmt='(a,1x,es14.7)') 'veg_temp  :',initp%veg_temp(ico)
-           write(unit=*,fmt='(a,1x,es14.7)') 'veg_water :',initp%veg_water(ico)
-           write(unit=*,fmt='(a,1x,es14.7)') 'rb        :',cpatch%rb(ico)
-           write(unit=*,fmt='(a)')           ' '
-           write(unit=*,fmt='(a,1x,es14.7)') 'hcapveg   :',hcapveg
-           write(unit=*,fmt='(a,1x,es14.7)') 'dveg_temp :',dinitp%veg_temp(ico)
-           write(unit=*,fmt='(a,1x,es14.7)') 'dveg_water:',dinitp%veg_water(ico)
-        end if
+       
 
 
         !dinitp%veg_temp = dvegQtot / hcapveg
