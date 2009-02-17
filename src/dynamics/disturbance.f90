@@ -877,14 +877,12 @@ end subroutine apply_disturbances_ar
        cpatch%hite(nc)  = dbh2h(pft,max_dbh(pft))
     endif
 
-    print*,"add",cpatch%hite(nc),cpatch%dbh(nc),cpatch%bdead(nc),cpatch%bleaf(nc),hgt_min(cpatch%pft(nc)),height_factor
     cpatch%phenology_status = 0
     cpatch%balive(nc) = cpatch%bleaf(nc) * &
          (1.0 + q(cpatch%pft(nc)) + qsw(cpatch%pft(nc)) * cpatch%hite(nc))
     cpatch%lai(nc) = cpatch%bleaf(nc) * cpatch%nplant(nc) * sla(cpatch%pft(nc))
     cpatch%bstorage(nc) = 1.0*(cpatch%balive(nc)) !! changed by MCD, was 0.0
 
-    print*,"BSTORE = ",cpatch%bstorage(nc), cpatch%lai(nc)
 
     cpatch%veg_temp(nc) = csite%can_temp(np)
     cpatch%veg_water(nc) = 0.0
