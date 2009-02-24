@@ -410,7 +410,8 @@ contains
           cpatch%veg_water(ico)  = 0. 
           cpatch%veg_energy(ico) = cpatch%hcapveg(ico) * cpatch%veg_temp(ico)
        end if
-
+       ! For plants buried in snow, fix the leaf temperature to the snow temperature of the
+       ! layer that is the closest to the leaves.
        if (cpatch%hite(ico) <  csite%total_snow_depth(ipa)) then
           adjacent_layer = 1
            do k = csite%nlev_sfcwater(ipa), 1, -1
@@ -485,8 +486,6 @@ contains
 
        end if
     end do
-
-    print*, cpatch%hcapveg(1), cpatch%veg_temp(1), cpatch%veg_energy(1), cpatch%hite(1), csite%total_snow_depth(ipa)
 
 
     ksn = csite%nlev_sfcwater(ipa)
