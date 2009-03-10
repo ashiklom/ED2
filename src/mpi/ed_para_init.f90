@@ -242,7 +242,7 @@ subroutine get_work(ifm,nxp,nyp)
   write(unit=*,fmt=*) ' => Generating the land/sea mask.'
 
   call leaf_database(trim(veg_database), npoly, 'leaf_class', lat_list,  &
-       lon_list, ipcent_land)
+                     lon_list, ipcent_land)
 
   if (isoilflg(ifm) == 1) then
      allocate(ntext_soil_list(npoly))
@@ -263,15 +263,16 @@ subroutine get_work(ifm,nxp,nyp)
            work_e(ifm)%work(i,j)      = 1.0
            work_e(ifm)%landfrac(i,j)  = real(ipcent_land(ipy))/100.0
 
-           if (isoilflg(ifm) == 1) then
+           select case (isoilflg(ifm))
+           case (1)  !! set from data base or LEAF-3
               datsoil = ntext_soil_list(ipy)
 
               ! This is to prevent datsoil to be zero when the polygon was assumed land
               if (datsoil == 0) datsoil=nslcon
               work_e(ifm)%ntext(i,j) = datsoil
-           else  !! set from ED2IN
+           case (2) !! set from ED2IN/RAMSIN
               work_e(ifm)%ntext(i,j) = nslcon
-           end if
+           end select
         else
            !----- Making this grid point 100% water ---------------------------------------!
            work_e(ifm)%landfrac(i,j)  = 0.
