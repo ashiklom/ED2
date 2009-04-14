@@ -546,7 +546,7 @@ subroutine leaftw_derivs_ar(initp,dinitp,csite,ipa,isi,ipy,rhos,prss,pcpg,qpcpg,
                   * (wgpmid / soil(nsoil)%slmsts)**(2. * soil(nsoil)%slbs + 3.)            &
                   * freezeCor
       
-      dinitp%avg_drainage = w_flux(lsl)*1000.0  ! Make it kg/s instead of m3
+      dinitp%avg_drainage = w_flux(lsl)*wdns  ! Make it kg/s instead of m3
 
       !------------------------------------------------------------------------------------!
       !      Limit water transfers to prevent over-saturation and over-depletion.          !
