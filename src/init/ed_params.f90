@@ -319,7 +319,7 @@ implicit none
 
 D0 = 0.01 ! same for all PFTs
 
-Vm_low_temp(1:4) = 5.0 ! tropical PFTs
+Vm_low_temp(1:4) = 5.0     ! tropical PFTs
 Vm_low_temp(5:13) = 4.7137 ! temperate PFTs
 Vm_low_temp(14:15) = 5.0 
 
@@ -472,9 +472,9 @@ subroutine init_pft_mort_params()
 
    mort2 = 20.0
 
-   mort3(1) = 0.06167 ! 0.037
-   mort3(2) = 0.06167 ! 0.037
-   mort3(3) = 0.03167 ! 0.019
+   mort3(1) = 0.037 ! 0.06167
+   mort3(2) = 0.037 ! 0.06167
+   mort3(3) = 0.019 ! 0.03167
    mort3(4) = 0.0
    mort3(5) = 0.066
    mort3(6) = 0.0033928
@@ -863,8 +863,8 @@ subroutine init_pft_leaf_params()
    !---------------------------------------------------------------------------------------!
    c_grn_leaf_dry(1:15)      = 3218.0    ! Jones 1992  J/(kg K)
    c_ngrn_biom_dry(1:15)     = 1256.0    ! Forest Products Laboratory 
-   !wat_dry_ratio_grn(1:15)   = 2.5       ! 
-   wat_dry_ratio_grn(1:15)   = 1.5       ! Ceccato et al. 2001
+   wat_dry_ratio_grn(1:15)   = 2.5       ! 
+   !wat_dry_ratio_grn(1:15)   = 1.5       ! Ceccato et al. 2001
    wat_dry_ratio_ngrn(1:15)  = 0.7       ! Forest Products Laboratory
    !---------------------------------------------------------------------------------------!
    !     Delta-c is found using the second term of the RHS of equation 5, assuming         !
