@@ -1,65 +1,4 @@
 Module consts_coms
-
-! Making the constants to match when running a coupled run.
-
-#if defined(COUPLED)
-   use rconstants, only:                                                                   &
-       b_pi1        => pi1        , b_twopi      => twopi      , b_pio180     => pio180    &
-     , b_pi4        => pi4        , b_pio4       => pio4       , b_srtwo      => srtwo     &
-     , b_srthree    => srthree    , b_srtwoi     => srtwoi     , b_srthreei   => srthreei  &
-     , b_onethird   => onethird   , b_stefan     => stefan     , b_boltzmann  => boltzmann &
-     , b_t00        => t00        , b_yr_day     => yr_day     , b_day_sec    => day_sec   &
-     , b_day_hr     => day_hr     , b_hr_sec     => hr_sec     , b_min_sec    => min_sec   &
-     , b_vonk       => vonk       , b_g          => g          , b_erad       => erad      &
-     , b_p00        => p00        , b_p00i       => p00i       , b_rgas       => rgas      &
-     , b_cp         => cp         , b_cpog       => cpog       , b_rocp       => rocp      &
-     , b_cpor       => cpor       , b_cpi        => cpi        , b_rm         => rm        &
-     , b_ep         => ep         , b_epi        => epi        , b_toodry     => toodry    &
-     , b_cliq       => cliq       , b_cliqvlme   => cliqvlme   , b_cliqi      => cliqi     &
-     , b_cice       => cice       , b_cicevlme   => cicevlme   , b_cicei      => cicei     &
-     , b_t3ple      => t3ple      , b_t3plei     => t3plei     , b_es3ple     => es3ple    &
-     , b_es3plei    => es3plei    , b_epes3ple   => epes3ple   , b_alvl       => alvl      &
-     , b_alvi       => alvi       , b_alli       => alli       , b_allivlme   => allivlme  &
-     , b_allii      => allii      , b_wdns       => wdns       , b_erad2      => erad2     &
-     , b_sqrtpii    => sqrtpii    , b_onesixth   => onesixth   , b_qicet3     => qicet3    &
-     , b_wdnsi      => wdnsi      , b_gorm       => gorm       , b_idns       => idns      &
-     , b_idnsi      => idnsi      , b_tsupercool => tsupercool , b_twothirds  => twothirds &
-     , b_qliqt3     => qliqt3     , b_sqrt2o2    => sqrt2o2
-
-   implicit none
-
-   real, parameter :: pi1        = b_pi1        , twopi      = b_twopi
-   real, parameter :: pio180     = b_pio180     , pi4        = b_pi4
-   real, parameter :: pio4       = b_pio4       , srtwo      = b_srtwo
-   real, parameter :: srthree    = b_srthree    , srtwoi     = b_srtwoi
-   real, parameter :: srthreei   = b_srthreei   , onethird   = b_onethird
-   real, parameter :: twothirds  = b_twothirds  , stefan     = b_stefan
-   real, parameter :: boltzmann  = b_boltzmann  , tsupercool = b_tsupercool
-   real, parameter :: t00        = b_t00        , yr_day     = b_yr_day
-   real, parameter :: day_sec    = b_day_sec    , day_hr     = b_day_hr
-   real, parameter :: hr_sec     = b_hr_sec     , min_sec    = b_min_sec
-   real, parameter :: vonk       = b_vonk       , grav       = b_g
-   real, parameter :: erad       = b_erad       , p00        = b_p00
-   real, parameter :: p00i       = b_p00i       , rdry       = b_rgas
-   real, parameter :: cp         = b_cp         , cpog       = b_cpog
-   real, parameter :: rocp       = b_rocp       , cpor       = b_cpor
-   real, parameter :: cpi        = b_cpi        , rvap       = b_rm
-   real, parameter :: ep         = b_ep         , epi        = b_epi
-   real, parameter :: toodry     = b_toodry     , cliq       = b_cliq
-   real, parameter :: cliqvlme   = b_cliqvlme   , cliqi      = b_cliqi
-   real, parameter :: cice       = b_cice       , cicevlme   = b_cicevlme
-   real, parameter :: cicei      = b_cicei      , t3ple      = b_t3ple
-   real, parameter :: t3plei     = b_t3plei     , es3ple     = b_es3ple
-   real, parameter :: es3plei    = b_es3plei    , epes3ple   = b_epes3ple
-   real, parameter :: alvl       = b_alvl       , alvi       = b_alvi
-   real, parameter :: alli       = b_alli       , allivlme   = b_allivlme
-   real, parameter :: allii      = b_allii      , wdns       = b_wdns
-   real, parameter :: erad2      = b_erad2      , sqrtpii    = b_sqrtpii
-   real, parameter :: onesixth   = b_onesixth   , qicet3     = b_qicet3
-   real, parameter :: wdnsi      = b_wdnsi      , gorvap     = b_gorm
-   real, parameter :: idns       = b_idns       , idnsi      = b_idnsi
-   real, parameter :: qliqt3     = b_qliqt3     , sqrt2o2    = b_sqrt2o2
-#else
    implicit none
 
    !---------------------------------------------------------------------------------------!
@@ -211,8 +150,6 @@ Module consts_coms
    !---------------------------------------------------------------------------------------!
    real, parameter :: tsupercool = t3ple - (qicet3+alli) * cliqi
    !---------------------------------------------------------------------------------------!
-
-#endif
 
    !---------------------------------------------------------------------------------------!
    ! Unit conversion, it must be defined locally even for coupled runs.                    !
