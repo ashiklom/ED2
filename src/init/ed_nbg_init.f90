@@ -90,8 +90,7 @@ subroutine init_nbg_cohorts(csite,lsl,ipa_a,ipa_z)
                                  , include_pft        & ! intent(in)
                                  , include_these_pft  & ! intent(in)
                                  , include_pft_ag     & ! intent(in)
-                                 , init_density       & ! intent(in)
-                                 , agf_bs
+                                 , init_density       ! ! intent(in)
    use consts_coms        , only : t3ple              & ! intent(in)
                                  , pio4               & ! intent(in)
                                  , kgom2_2_tonoha     & ! intent(in)
@@ -185,19 +184,15 @@ subroutine init_nbg_cohorts(csite,lsl,ipa_a,ipa_z)
          cpatch%broot(ico)            = q(ipft) * cpatch%balive(ico) * salloci
          cpatch%bsapwood(ico)         = qsw(ipft) * cpatch%hite(ico) * cpatch%balive(ico)  &
                                       * salloci
-         cpatch%bsapwooda(ico)        = cpatch%bsapwood(ico)*agf_bs
-         cpatch%bsapwoodb(ico)        = cpatch%bsapwood(ico) - cpatch%bsapwooda(ico)
-         cpatch%bdeada(ico)           = cpatch%bdead(ico)*agf_bs
-         cpatch%bdeadb(ico)           = cpatch%bdead(ico) - cpatch%bdeada(ico)
 
          !----- Find the initial area indices (LAI, WPA, WAI). ----------------------------!
-         call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdeada(ico)        &
-                          ,cpatch%bsapwooda(ico),cpatch%dbh(ico), cpatch%hite(ico)        &
-                          ,cpatch%pft(ico),cpatch%sla(ico),cpatch%lai(ico)                &
+         call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdead(ico)          &
+                          ,cpatch%balive(ico),cpatch%dbh(ico), cpatch%hite(ico)            &
+                          ,cpatch%pft(ico),cpatch%sla(ico),cpatch%lai(ico)                 &
                           ,cpatch%wpa(ico),cpatch%wai(ico))
 
          !----- Find the above-ground biomass and basal area. -----------------------------!
-         cpatch%agb(ico) = ed_biomass(cpatch%bdeada(ico),cpatch%bsapwooda(ico)                 &
+         cpatch%agb(ico) = ed_biomass(cpatch%bdead(ico),cpatch%balive(ico)                 &
                                      ,cpatch%bleaf(ico),cpatch%pft(ico)                    &
                                      ,cpatch%hite(ico),cpatch%bstorage(ico))
          cpatch%basarea(ico) = pio4 * cpatch%dbh(ico)*cpatch%dbh(ico)
@@ -213,8 +208,8 @@ subroutine init_nbg_cohorts(csite,lsl,ipa_a,ipa_z)
          !---------------------------------------------------------------------------------!
          cpatch%veg_water(ico)  = 0.0
          cpatch%veg_fliq(ico)   = 0.0
-         cpatch%hcapveg(ico)    = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdeada(ico)     &
-                                              ,cpatch%bsapwooda(ico),cpatch%nplant(ico)    &
+         cpatch%hcapveg(ico)    = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdead(ico)         &
+                                              ,cpatch%balive(ico),cpatch%nplant(ico)       &
                                               ,cpatch%hite(ico),cpatch%pft(ico)            &
                                               ,cpatch%phenology_status(ico))
  
@@ -258,8 +253,7 @@ subroutine init_cohorts_by_layers(csite,lsl,ipa_a,ipa_z)
                                  , include_pft        & ! intent(in)
                                  , include_these_pft  & ! intent(in)
                                  , include_pft_ag     & ! intent(in)
-                                 , init_density       & ! intent(in)
-                                 , agf_bs
+                                 , init_density       ! ! intent(in)
    use consts_coms        , only : t3ple              & ! intent(in)
                                  , pio4               & ! intent(in)
                                  , kgom2_2_tonoha     & ! intent(in)
@@ -339,23 +333,18 @@ subroutine init_cohorts_by_layers(csite,lsl,ipa_a,ipa_z)
          cpatch%broot(ico)            = q(ipft) * cpatch%balive(ico) * salloci
          cpatch%bsapwood(ico)         = qsw(ipft) * cpatch%hite(ico) * cpatch%balive(ico)  &
                                       * salloci
-         cpatch%bsapwooda(ico)        = cpatch%bsapwood(ico)*agf_bs
-         cpatch%bsapwoodb(ico)        = cpatch%bsapwood(ico) - cpatch%bsapwoodb(ico)
-         cpatch%bdeada(ico)           = cpatch%bdead(ico)*agf_bs
-         cpatch%bdeadb(ico)           = cpatch%bdead(ico) - cpatch%bdeadb(ico)
-
 
          !----- NPlant is defined such that the cohort LAI is equal to LAI0
          cpatch%nplant(ico)           = lai0 / (cpatch%bleaf(ico) * cpatch%sla(ico))
 
          !----- Find the initial area indices (LAI, WPA, WAI). ----------------------------!
-         call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdeada(ico)       &
-                          ,cpatch%bsapwooda(ico),cpatch%dbh(ico), cpatch%hite(ico)        &
+         call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdead(ico)          &
+                          ,cpatch%balive(ico),cpatch%dbh(ico), cpatch%hite(ico)            &
                           ,cpatch%pft(ico),cpatch%sla(ico),cpatch%lai(ico)                 &
                           ,cpatch%wpa(ico),cpatch%wai(ico))
 
          !----- Find the above-ground biomass and basal area. -----------------------------!
-         cpatch%agb(ico) = ed_biomass(cpatch%bdeada(ico),cpatch%bsapwooda(ico)                 &
+         cpatch%agb(ico) = ed_biomass(cpatch%bdead(ico),cpatch%balive(ico)                 &
                                      ,cpatch%bleaf(ico),cpatch%pft(ico)                    &
                                      ,cpatch%hite(ico),cpatch%bstorage(ico))
          cpatch%basarea(ico) = cpatch%dbh(ico)*cpatch%dbh(ico)
@@ -371,8 +360,8 @@ subroutine init_cohorts_by_layers(csite,lsl,ipa_a,ipa_z)
          !---------------------------------------------------------------------------------!
          cpatch%veg_water(ico)  = 0.0
          cpatch%veg_fliq(ico)   = 0.0
-         cpatch%hcapveg(ico)    = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdeada(ico)       &
-                                              ,cpatch%bsapwooda(ico),cpatch%nplant(ico)   &
+         cpatch%hcapveg(ico)    = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdead(ico)         &
+                                              ,cpatch%balive(ico),cpatch%nplant(ico)       &
                                               ,cpatch%hite(ico),cpatch%pft(ico)            &
                                               ,cpatch%phenology_status(ico))
  

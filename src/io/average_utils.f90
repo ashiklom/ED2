@@ -1998,6 +1998,7 @@ subroutine normalize_ed_monthly_output_vars(cgrid)
                                    , tai_min       ! ! intent(in)
    use therm_lib            , only : idealdenssh   & ! function
                                    , qwtk          ! ! function
+   use allometry            , only : ed_biomass    ! ! function
 
    implicit none
    !----- Arguments. ----------------------------------------------------------------------!
@@ -2479,6 +2480,7 @@ subroutine update_ed_yearly_vars(cgrid)
    use ed_state_vars,only:edtype,polygontype,sitetype,patchtype
    use ed_max_dims, only: n_pft, n_dbh
    use consts_coms, only: pi1
+   use allometry, only: ed_biomass
   
    implicit none
 

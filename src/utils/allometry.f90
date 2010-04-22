@@ -296,15 +296,55 @@ module allometry
    !=======================================================================================!
 
 
+
+
+
+
+   !=======================================================================================!
+   !=======================================================================================!
+   !     This subroutine finds the total above ground biomass corresponding to wood (stem  !
+   ! + branches).                                                                          !
+   !---------------------------------------------------------------------------------------!
+   real function wood_biomass(bdead, balive, pft, hite)
+      use pft_coms, only:  agf_bs          & ! intent(in)
+                         , q               & ! intent(in)
+                         , qsw             ! ! intent(in)
+      implicit none
+      !----- Arguments --------------------------------------------------------------------!
+      real    , intent(in) :: bdead
+      real    , intent(in) :: balive
+      real    , intent(in) :: hite
+      integer , intent(in) :: pft
+      !----- Local variables --------------------------------------------------------------!
+      real                 :: bstem
+      real                 :: bsapwood
+      !------------------------------------------------------------------------------------!
+
+      bstem        = agf_bs * bdead
+      bsapwood     = agf_bs * balive * qsw(pft) * hite / (1.0 + q(pft) + qsw(pft) * hite)
+      wood_biomass = bstem + bsapwood
+      return
+   end function wood_biomass
+   !=======================================================================================!
+   !=======================================================================================!
+
+
+
+
+
+
    !=======================================================================================!
    !=======================================================================================!
    !     This subroutine finds the total above ground biomass (wood + leaves)              !
    !---------------------------------------------------------------------------------------!
-   real function ed_biomass(bdeada, bsapwooda, bleaf, pft, hite, bstorage)
+   real function ed_biomass(bdead, balive, bleaf, pft, hite, bstorage)
+      use pft_coms, only:  agf_bs & ! intent(in)
+                         , q      & ! intent(in)
+                         , qsw    ! ! intent(in)
       implicit none
       !----- Arguments --------------------------------------------------------------------!
-      real    , intent(in) :: bdeada
-      real    , intent(in) :: bsapwooda
+      real    , intent(in) :: bdead
+      real    , intent(in) :: balive
       real    , intent(in) :: bleaf
       real    , intent(in) :: hite
       real    , intent(in) :: bstorage
@@ -313,7 +353,7 @@ module allometry
       real                 :: bwood
       !------------------------------------------------------------------------------------!
 
-      bwood      = bdeada + bsapwooda
+      bwood      = wood_biomass(bdead, balive, pft, hite)
       ed_biomass = bleaf + bwood
 
       return
@@ -328,30 +368,26 @@ module allometry
 
    !=======================================================================================!
    !=======================================================================================!
-   real function bd2dbh(ipft, bdeada)
+   real function bd2dbh(ipft, bdead)
 
       use pft_coms, only:  is_tropical & ! intent(in), lookup table
                          , rho         & ! intent(in), lookup table
                          , b1Bs        & ! intent(in), lookup table
                          , b2Bs        & ! intent(in), lookup table
                          , C2B         & ! intent(in)
-                         , max_dbh     & ! intent(in), lookup table
-                         , agf_bs
+                         , max_dbh     ! ! intent(in), lookup table
 
       implicit none
       !----- Arguments --------------------------------------------------------------------!
       integer, intent(in) :: ipft
-      real   , intent(in) :: bdeada
+      real   , intent(in) :: bdead
       !----- Local variables --------------------------------------------------------------!
       real :: p
       real :: q
       real :: r
       real :: dbh_pot
       real :: h_max
-      real :: bdead  !! **EFFECTIVE** total biomass
       !------------------------------------------------------------------------------------!
-
-      bdead = bdeada/agf_bs
 
       if (is_tropical(ipft)) then
 
@@ -403,7 +439,7 @@ module allometry
    !                     forestry systems. Rapports Production Soudano-Sahélienne.         !
    !                     Wageningen, 1995.                                                 !
    !---------------------------------------------------------------------------------------!
-   subroutine area_indices(nplant,bleaf,bdeada,bsapwooda,dbh,hite,pft,sla,lai,wpa,wai)
+   subroutine area_indices(nplant,bleaf,bdead,balive,dbh,hite,pft,sla,lai,wpa,wai)
       use pft_coms    , only : is_tropical     & ! intent(in)
                              , is_grass        & ! intent(in)
                              , rho             & ! intent(in)
@@ -426,8 +462,8 @@ module allometry
       integer , intent(in)  :: pft     ! Plant functional type               [         ---]
       real    , intent(in)  :: nplant  ! Number of plants                    [    plant/m²]
       real    , intent(in)  :: bleaf   ! Specific leaf biomass               [   kgC/plant]
-      real    , intent(in)  :: bdeada  ! Specific structural                 [   kgC/plant]
-      real    , intent(in)  :: bsapwooda ! Specific abg sapwood biomass      [   kgC/plant]
+      real    , intent(in)  :: bdead   ! Specific structural                 [   kgC/plant]
+      real    , intent(in)  :: balive  ! Specific live tissue biomass        [   kgC/plant]
       real    , intent(in)  :: dbh     ! Diameter at breast height           [          cm]
       real    , intent(in)  :: hite    ! Plant height                        [           m]
       real    , intent(in)  :: sla     ! Specific leaf area                  [m²leaf/plant]
@@ -466,7 +502,7 @@ module allometry
          !---------------------------------------------------------------------------------!
          !     Finding the total wood biomass and the fraction corresponding to branches.  !
          !---------------------------------------------------------------------------------!
-         bwood   = bdeada + bsapwooda
+         bwood   = wood_biomass(bdead, balive, pft, hite)
          if (is_grass(pft)) then
             swa = conijn_a(pft)
          else

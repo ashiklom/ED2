@@ -231,7 +231,6 @@ subroutine update_phenology(doy, cpoly, isi, lat)
          
          !----- Initially, we assume all leaves stay. -------------------------------------!
          cpatch%leaf_drop(ico) = 0.0
-         bl_max = dbh2bl(cpatch%dbh(ico),ipft)
 
          !----- Find cohort-specific thresholds. ------------------------------------------!
          select case (iphen_scheme)
@@ -323,8 +322,7 @@ subroutine update_phenology(doy, cpoly, isi, lat)
                
                !----- It is time to flush.  Update carbon pools ---------------------------!
                cpatch%phenology_status(ico) = 1
-!! [mcd 03.09.10 moved all growth to growth_balive]
-!!               cpatch%bleaf(ico)            = cpatch%balive(ico) * salloci
+               cpatch%bleaf(ico)            = cpatch%balive(ico) * salloci
             end if  ! critical moisture
 
          case (2)
@@ -361,7 +359,7 @@ subroutine update_phenology(doy, cpoly, isi, lat)
                                     * (1.0 - f_labile(ipft)) * l2n_stem / c2n_stem(ipft)
                   
                   !----- Adjust plant carbon pools. ---------------------------------------!
-                  cpatch%bleaf(ico)   = cpatch%bleaf(ico) - delta_bleaf
+                  cpatch%balive(ico)   = cpatch%balive(ico) - delta_bleaf
                   cpatch%bstorage(ico) = cpatch%bstorage(ico)                              &
                                        + retained_carbon_fraction * delta_bleaf
 
@@ -373,7 +371,7 @@ subroutine update_phenology(doy, cpoly, isi, lat)
                                         + delta_bleaf * cpatch%nplant(ico)                 &
                                         * retained_carbon_fraction                         &
                                         * (1.0 / c2n_leaf(ipft) - 1.0/c2n_storage)
-!!                  cpatch%bleaf(ico)     = bl_max
+                  cpatch%bleaf(ico)     = bl_max
                   cpatch%cb(13,ico)     = cpatch%cb(13,ico) - cpatch%leaf_drop(ico)
                   cpatch%cb_max(13,ico) = cpatch%cb_max(13,ico) - cpatch%leaf_drop(ico)
                end if
@@ -389,9 +387,8 @@ subroutine update_phenology(doy, cpoly, isi, lat)
                ! the plant carbon pools, and the phenology status.                         !
                !---------------------------------------------------------------------------!
                cpatch%phenology_status(ico) = 1
-!! [mcd 03.09.10 moved all growth to growth_balive]
-!!               cpatch%bleaf(ico) = cpoly%green_leaf_factor(ipft,isi) * cpatch%balive(ico)  &
-!!                                 * salloci
+               cpatch%bleaf(ico) = cpoly%green_leaf_factor(ipft,isi) * cpatch%balive(ico)  &
+                                 * salloci
             end if
 
 
@@ -427,7 +424,7 @@ subroutine update_phenology(doy, cpoly, isi, lat)
                                  * (1.0 - f_labile(ipft)) * l2n_stem / c2n_stem(ipft)
 
                !----- Adjust plant carbon pools. ------------------------------------------!
-               cpatch%bleaf(ico)   = cpatch%bleaf(ico) - delta_bleaf
+               cpatch%balive(ico)   = cpatch%balive(ico) - delta_bleaf
                cpatch%bstorage(ico) = cpatch%bstorage(ico) + retained_carbon_fraction      &
                                     * delta_bleaf
                !---------------------------------------------------------------------------!
@@ -438,14 +435,13 @@ subroutine update_phenology(doy, cpoly, isi, lat)
                                      * retained_carbon_fraction                            &
                                      * (1.0 / c2n_leaf(ipft) - 1.0/c2n_storage)
                
-!!               cpatch%bleaf(ico)     = bl_max
+               cpatch%bleaf(ico)     = bl_max
                cpatch%cb(13,ico)     = cpatch%cb(13,ico)     - cpatch%leaf_drop(ico)
                cpatch%cb_max(13,ico) = cpatch%cb_max(13,ico) - cpatch%leaf_drop(ico)
             !------ Becoming slightly moister again, start flushing the leaves. -----------!
             elseif (elongf > 0.02) then
                cpatch%phenology_status(ico) = 1 
-!! [mcd 03.09.10 moved all growth to growth_balive]
-!!               cpatch%bleaf(ico)            = elongf * cpatch%balive(ico) * salloci
+               cpatch%bleaf(ico)            = elongf * cpatch%balive(ico) * salloci
             end if
 
             !----- In case it is too dry, drop all the leaves... --------------------------!
@@ -458,13 +454,13 @@ subroutine update_phenology(doy, cpoly, isi, lat)
          !---------------------------------------------------------------------------------!
 
          !----- Update LAI, WPA, and WAI accordingly. -------------------------------------!
-         call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdeada(ico)         &
-                          ,cpatch%bsapwooda(ico),cpatch%dbh(ico), cpatch%hite(ico)        &
+         call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdead(ico)          &
+                          ,cpatch%balive(ico),cpatch%dbh(ico), cpatch%hite(ico)            &
                           ,cpatch%pft(ico),cpatch%sla(ico), cpatch%lai(ico)                &
                           ,cpatch%wpa(ico),cpatch%wai(ico))
 
          !----- Update above-ground biomass. ----------------------------------------------!
-         cpatch%agb(ico) = ed_biomass(cpatch%bdeada(ico),cpatch%bsapwooda(ico)                 &
+         cpatch%agb(ico) = ed_biomass(cpatch%bdead(ico),cpatch%balive(ico)                 &
                                      ,cpatch%bleaf(ico),cpatch%pft(ico)                    &
                                      ,cpatch%hite(ico) ,cpatch%bstorage(ico) ) 
 
@@ -473,8 +469,8 @@ subroutine update_phenology(doy, cpoly, isi, lat)
          ! using a constant temperature assumption.                                        !
          !---------------------------------------------------------------------------------!
          old_hcapveg         = cpatch%hcapveg(ico)
-         cpatch%hcapveg(ico) = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdeada(ico)           &
-                                           ,cpatch%bsapwooda(ico),cpatch%nplant(ico)       &
+         cpatch%hcapveg(ico) = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdead(ico)            &
+                                           ,cpatch%balive(ico),cpatch%nplant(ico)          &
                                            ,cpatch%hite(ico),cpatch%pft(ico)               &
                                            ,cpatch%phenology_status(ico))
          csite%hcapveg(ipa)  = csite%hcapveg(ipa) + cpatch%hcapveg(ico) - old_hcapveg

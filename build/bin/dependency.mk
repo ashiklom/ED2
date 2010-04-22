@@ -28,8 +28,8 @@ events.o: fuse_fiss_utils.mod grid_coms.mod pft_coms.mod therm_lib.mod
 farq_leuning.o: c34constants.mod consts_coms.mod pft_coms.mod phenology_coms.mod
 farq_leuning.o: physiology_coms.mod therm_lib.mod
 fire.o: allometry.mod consts_coms.mod disturb_coms.mod ed_state_vars.mod
-fire.o: grid_coms.mod soil_coms.mod
-forestry.o: disturb_coms.mod disturbance_utils.mod ed_max_dims.mod
+fire.o: grid_coms.mod pft_coms.mod soil_coms.mod
+forestry.o: allometry.mod disturb_coms.mod disturbance_utils.mod ed_max_dims.mod
 forestry.o: ed_state_vars.mod fuse_fiss_utils.mod grid_coms.mod
 growth_balive.o: allometry.mod consts_coms.mod decomp_coms.mod ed_max_dims.mod
 growth_balive.o: ed_misc_coms.mod ed_state_vars.mod ed_therm_lib.mod
@@ -54,8 +54,8 @@ reproduction.o: ed_state_vars.mod ed_therm_lib.mod fuse_fiss_utils.mod
 reproduction.o: mem_sites.mod pft_coms.mod phenology_coms.mod
 rk4_derivs.o: allometry.mod canopy_struct_dynamics.mod consts_coms.mod
 rk4_derivs.o: ed_max_dims.mod ed_misc_coms.mod ed_state_vars.mod
-rk4_derivs.o: ed_therm_lib.mod grid_coms.mod rk4_coms.mod soil_coms.mod
-rk4_derivs.o: therm_lib8.mod
+rk4_derivs.o: ed_therm_lib.mod grid_coms.mod pft_coms.mod rk4_coms.mod
+rk4_derivs.o: soil_coms.mod therm_lib8.mod
 rk4_driver.o: canopy_air_coms.mod canopy_struct_dynamics.mod consts_coms.mod
 rk4_driver.o: ed_misc_coms.mod ed_state_vars.mod ed_therm_lib.mod grid_coms.mod
 rk4_driver.o: rk4_coms.mod soil_coms.mod therm_lib.mod
@@ -98,9 +98,9 @@ landuse_init.o: consts_coms.mod disturb_coms.mod ed_max_dims.mod
 landuse_init.o: ed_misc_coms.mod ed_state_vars.mod grid_coms.mod
 phenology_init.o: ed_max_dims.mod ed_misc_coms.mod ed_state_vars.mod
 phenology_init.o: grid_coms.mod phenology_coms.mod
-average_utils.o: canopy_radiation_coms.mod consts_coms.mod ed_max_dims.mod
-average_utils.o: ed_misc_coms.mod ed_state_vars.mod grid_coms.mod pft_coms.mod
-average_utils.o: therm_lib.mod
+average_utils.o: allometry.mod canopy_radiation_coms.mod consts_coms.mod
+average_utils.o: ed_max_dims.mod ed_misc_coms.mod ed_state_vars.mod
+average_utils.o: grid_coms.mod pft_coms.mod therm_lib.mod
 ed_history_io.o: allometry.mod c34constants.mod consts_coms.mod disturb_coms.mod
 ed_history_io.o: ed_max_dims.mod ed_misc_coms.mod ed_node_coms.mod
 ed_history_io.o: ed_state_vars.mod ed_therm_lib.mod fuse_fiss_utils.mod
@@ -148,6 +148,7 @@ grid_coms.o: ed_max_dims.mod
 hdf5_coms.o: 
 mem_sites.o: ed_max_dims.mod
 met_driver_coms.o: ed_max_dims.mod
+misc_coms.o: max_dims.mod
 optimiz_coms.o: ed_max_dims.mod
 pft_coms.o: ed_max_dims.mod
 physiology_coms.o: ed_max_dims.mod
@@ -172,8 +173,9 @@ budget_utils.o: ed_state_vars.mod grid_coms.mod rk4_coms.mod soil_coms.mod
 dateutils.o: consts_coms.mod
 ed_filelist.o: ed_max_dims.mod
 ed_grid.o: consts_coms.mod ed_max_dims.mod ed_node_coms.mod grid_coms.mod
-ed_therm_lib.o: consts_coms.mod ed_state_vars.mod grid_coms.mod pft_coms.mod
-ed_therm_lib.o: rk4_coms.mod soil_coms.mod therm_lib.mod therm_lib8.mod
+ed_therm_lib.o: allometry.mod consts_coms.mod ed_state_vars.mod grid_coms.mod
+ed_therm_lib.o: pft_coms.mod rk4_coms.mod soil_coms.mod therm_lib.mod
+ed_therm_lib.o: therm_lib8.mod
 fatal_error.o: ed_misc_coms.mod ed_node_coms.mod
 fuse_fiss_utils.o: allometry.mod consts_coms.mod decomp_coms.mod
 fuse_fiss_utils.o: disturb_coms.mod ed_max_dims.mod ed_misc_coms.mod
@@ -193,7 +195,7 @@ update_derived_props.o: allometry.mod canopy_air_coms.mod consts_coms.mod
 update_derived_props.o: ed_misc_coms.mod ed_state_vars.mod ed_therm_lib.mod
 update_derived_props.o: fuse_fiss_utils.mod grid_coms.mod soil_coms.mod
 update_derived_props.o: therm_lib.mod
-utils_c.o: /home/mdietze/AGROED/EDBRAMS/ED/src/include/utils_sub_names.h
+utils_c.o: /home/mdietze/r31/EDBRAMS/ED/src/include/utils_sub_names.h
 utils_c.o:
 allometry.mod: allometry.o
 an_header.mod: an_header.o
@@ -229,6 +231,7 @@ libxml2f90_strings_module.mod: libxml2f90.f90_pp.o
 ll_module.mod: libxml2f90.f90_pp.o
 mem_sites.mod: mem_sites.o
 met_driver_coms.mod: met_driver_coms.o
+misc_coms.mod: misc_coms.o
 mortality.mod: mortality.o
 optimiz_coms.mod: optimiz_coms.o
 pft_coms.mod: pft_coms.o

@@ -17,8 +17,7 @@ subroutine structural_growth(cgrid, month)
                             , c2n_storage            & ! intent(in)
                             , c2n_recruit            & ! intent(in)
                             , c2n_stem               & ! intent(in)
-                            , l2n_stem               & ! intent(in)
-                            , agf_bs
+                            , l2n_stem               ! ! intent(in)
    use decomp_coms   , only : f_labile               ! ! intent(in)
    use ed_max_dims   , only : n_pft                  & ! intent(in)
                             , n_dbh                  ! ! intent(in)
@@ -40,10 +39,10 @@ subroutine structural_growth(cgrid, month)
    integer                       :: ipft
    integer                       :: update_month
    integer                       :: imonth
+   real                          :: salloc
+   real                          :: salloci
    real                          :: balive_in
    real                          :: bdead_in
-   real                          :: bdeada_in
-   real                          :: bdeadb_in
    real                          :: hite_in
    real                          :: dbh_in
    real                          :: nplant_in
@@ -62,9 +61,6 @@ subroutine structural_growth(cgrid, month)
    real                          :: cb_act
    real                          :: cb_max
    real                          :: old_hcapveg
-   real                          :: bdead_inc
-   real                          :: abovedef
-   real                          :: belowdef
    !---------------------------------------------------------------------------------------!
 
    polyloop: do ipy = 1,cgrid%npolygons
@@ -85,13 +81,12 @@ subroutine structural_growth(cgrid, month)
                !----- Assigning an alias for PFT type. ------------------------------------!
                ipft    = cpatch%pft(ico)
 
+               salloc  = 1.0 + q(ipft) + qsw(ipft) * cpatch%hite(ico)
+               salloci = 1.0 / salloc
+
                !----- Remember inputs in order to calculate increments later on. ----------!
-               cpatch%balive(ico) = cpatch%bleaf(ico) + cpatch%broot(ico) &
-                    + cpatch%bsapwooda(ico) + cpatch%bsapwoodb(ico)
                balive_in   = cpatch%balive(ico)
                bdead_in    = cpatch%bdead(ico)
-               bdeada_in   = cpatch%bdeada(ico)
-               bdeadb_in   = cpatch%bdeadb(ico)
                hite_in     = cpatch%hite(ico)
                dbh_in      = cpatch%dbh(ico)
                nplant_in   = cpatch%nplant(ico)
@@ -111,8 +106,7 @@ subroutine structural_growth(cgrid, month)
                !----- Calculate litter owing to mortality. --------------------------------!
                balive_mort_litter   = - cpatch%balive(ico)   * cpatch%monthly_dndt(ico)
                bstorage_mort_litter = - cpatch%bstorage(ico) * cpatch%monthly_dndt(ico)
-               struct_litter        = - (cpatch%bdeada(ico) + cpatch%bdeadb(ico)) &
-                                      * cpatch%monthly_dndt(ico)
+               struct_litter        = - cpatch%bdead(ico)    * cpatch%monthly_dndt(ico)
                mort_litter          = balive_mort_litter + bstorage_mort_litter            &
                                     + struct_litter
 
@@ -124,43 +118,7 @@ subroutine structural_growth(cgrid, month)
                                                ,cgrid%lat(ipy),month,f_bseeds,f_bdead)
 
                !----- Grow plants; bdead gets fraction f_bdead of bstorage. ---------------!
-!!               cpatch%bdead(ico) = cpatch%bdead(ico) + f_bdead * cpatch%bstorage(ico)
-
-
-               !---- Balance new bdead between above and below ground components --!
-               !----  MCD  03/05/10   ----!
-               !! biomass increment
-               bdead_inc = f_bdead * cpatch%bstorage(ico)
-               !! above and belowground deficits to be on allometry
-               abovedef  = max(0.0,cpatch%bdeadb(ico)*agf_bs/(1.0-agf_bs) &
-                    -cpatch%bdeada(ico))
-               belowdef  = max(0.0,cpatch%bdeada(ico)*(1.0-agf_bs)/agf_bs &
-                    -cpatch%bdeadb(ico))
-               if(bdead_inc >= (abovedef+belowdef)) then
-                  !! either on allometry or have enough carbon to get on allometry
-                  !! get on allometry
-                  cpatch%bdeada(ico) = cpatch%bdeada(ico) + abovedef
-                  cpatch%bdeadb(ico) = cpatch%bdeadb(ico) + belowdef
-                  bdead_inc = bdead_inc - abovedef - belowdef
-                  
-                  !! partion remainder allometrically
-                  cpatch%bdeada(ico) = cpatch%bdeada(ico) + bdead_inc*agf_bs
-                  cpatch%bdeadb(ico) = cpatch%bdeadb(ico) + bdead_inc*(1.0-agf_bs)
-               else
-                  if((abovedef + belowdef) > tiny(1.0)) then
-                     !! partition based on relative deficit
-                     cpatch%bdeada(ico) = cpatch%bdeada(ico) + &
-                          bdead_inc*abovedef/(abovedef+belowdef)
-                     cpatch%bdeadb(ico) = cpatch%bdeadb(ico) + &
-                          bdead_inc*belowdef/(abovedef+belowdef)
-                  else
-                     !! deficit tiny allocate allometrically
-                     cpatch%bdeada(ico) = cpatch%bdeada(ico) + bdead_inc*agf_bs
-                     cpatch%bdeadb(ico) = cpatch%bdeadb(ico) + bdead_inc*(1.0-agf_bs)
-                  end if
-               endif
-               cpatch%bdead(ico) = cpatch%bdeada(ico) + cpatch%bdeadb(ico) 
-
+               cpatch%bdead(ico) = cpatch%bdead(ico) + f_bdead * cpatch%bstorage(ico)
 
                !---------------------------------------------------------------------------!
                !      Rebalance the plant nitrogen uptake considering the actual alloc-    !
@@ -218,8 +176,8 @@ subroutine structural_growth(cgrid, month)
                !      difference in the heat capacity to update it.                        !
                !---------------------------------------------------------------------------!
                old_hcapveg = cpatch%hcapveg(ico)
-               cpatch%hcapveg(ico) = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdeada(ico)    &
-                                                 ,cpatch%bsapwooda(ico),cpatch%nplant(ico) &
+               cpatch%hcapveg(ico) = calc_hcapveg(cpatch%bleaf(ico),cpatch%bdead(ico)      &
+                                                 ,cpatch%balive(ico),cpatch%nplant(ico)    &
                                                  ,cpatch%hite(ico),cpatch%pft(ico)         &
                                                  ,cpatch%phenology_status(ico))
                call update_veg_energy_cweh(csite,ipa,ico,old_hcapveg)
@@ -315,10 +273,10 @@ subroutine structural_growth_eq_0(cgrid, month)
    integer                       :: ipft
    integer                       :: update_month
    integer                       :: imonth
+   real                          :: salloc
+   real                          :: salloci
    real                          :: balive_in
    real                          :: bdead_in
-   real                          :: bdeada_in
-   real                          :: bdeadb_in
    real                          :: hite_in
    real                          :: dbh_in
    real                          :: nplant_in
@@ -357,13 +315,12 @@ subroutine structural_growth_eq_0(cgrid, month)
                !----- Assigning an alias for PFT type. ------------------------------------!
                ipft    = cpatch%pft(ico)
 
+               salloc  = 1.0 + q(ipft) + qsw(ipft) * cpatch%hite(ico)
+               salloci = 1.0 / salloc
+
                !----- Remember inputs in order to calculate increments later on. ----------!
-               cpatch%balive(ico) = cpatch%bleaf(ico) + cpatch%broot(ico) &
-                    + cpatch%bsapwooda(ico) + cpatch%bsapwoodb(ico)
                balive_in   = cpatch%balive(ico)
                bdead_in    = cpatch%bdead(ico)
-               bdeada_in    = cpatch%bdeada(ico)
-               bdeadb_in    = cpatch%bdeadb(ico)
                hite_in     = cpatch%hite(ico)
                dbh_in      = cpatch%dbh(ico)
                nplant_in   = cpatch%nplant(ico)
@@ -541,7 +498,7 @@ subroutine update_derived_cohort_props(cpatch,ico,green_leaf_factor,lsl)
    !---------------------------------------------------------------------------------------!
 
    !----- Getting DBH and height from structural biomass. ---------------------------------!
-   cpatch%dbh(ico) = bd2dbh(cpatch%pft(ico), cpatch%bdeada(ico))
+   cpatch%dbh(ico) = bd2dbh(cpatch%pft(ico), cpatch%bdead(ico))
    cpatch%hite(ico) = dbh2h(cpatch%pft(ico), cpatch%dbh(ico))
    
    !----- Checking the phenology status and whether it needs to change. -------------------!
@@ -562,14 +519,14 @@ subroutine update_derived_cohort_props(cpatch,ico,green_leaf_factor,lsl)
       cpatch%bleaf(ico) = bl
       
       !----- Update LAI, WPA, and WAI -----------------------------------------------------!
-      call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdeada(ico)           &
-                 ,cpatch%bsapwooda(ico),cpatch%dbh(ico), cpatch%hite(ico),cpatch%pft(ico)  &
+      call area_indices(cpatch%nplant(ico),cpatch%bleaf(ico),cpatch%bdead(ico)             &
+                 ,cpatch%balive(ico),cpatch%dbh(ico), cpatch%hite(ico),cpatch%pft(ico)     &
                  ,cpatch%sla(ico),cpatch%lai(ico),cpatch%wpa(ico),cpatch%wai(ico))
    end if
 
    !----- Finding the new basal area and above-ground biomass. ----------------------------!
    cpatch%basarea(ico) = pio4 * cpatch%dbh(ico) * cpatch%dbh(ico)                
-   cpatch%agb(ico)     = ed_biomass(cpatch%bdeada(ico),cpatch%bsapwooda(ico),cpatch%bleaf(ico) &
+   cpatch%agb(ico)     = ed_biomass(cpatch%bdead(ico),cpatch%balive(ico),cpatch%bleaf(ico) &
                                    ,cpatch%pft(ico),cpatch%hite(ico) ,cpatch%bstorage(ico))
 
    !----- Update rooting depth ------------------------------------------------------------!
@@ -602,6 +559,9 @@ subroutine update_vital_rates(cpatch,ico,ilu,dbh_in,bdead_in,balive_in,hite_in,b
                             , n_dist_types ! ! intent(in)
    use ed_misc_coms  , only : ddbhi        ! ! intent(in)
    use consts_coms   , only : pio4         ! ! intent(in)
+   use pft_coms      , only : agf_bs       & ! intent(in)
+                            , q            & ! intent(in)
+                            , qsw          ! ! intent(in)
    use allometry     , only : ed_biomass   ! ! function
    implicit none
 
@@ -639,7 +599,7 @@ subroutine update_vital_rates(cpatch,ico,ilu,dbh_in,bdead_in,balive_in,hite_in,b
 
    !----- Finding the new basal area and above-ground biomass. ----------------------------!
    cpatch%basarea(ico)    = pio4 * cpatch%dbh(ico) * cpatch%dbh(ico)
-   cpatch%agb(ico)        = ed_biomass(cpatch%bdeada(ico),cpatch%bsapwooda(ico)                &
+   cpatch%agb(ico)        = ed_biomass(cpatch%bdead(ico),cpatch%balive(ico)                &
                                       ,cpatch%bleaf(ico),cpatch%pft(ico)                   &
                                       ,cpatch%hite(ico) ,cpatch%bstorage(ico) ) 
 
@@ -838,10 +798,6 @@ subroutine compute_C_and_N_storage(cgrid,ipy, soil_C, soil_N, veg_C, veg_N)
          
          cohortloop: do ico = 1,cpatch%ncohorts
             
-            cpatch%bdead(ico) = cpatch%bdeada(ico) + cpatch%bdeadb(ico)
-            cpatch%balive(ico) = cpatch%bleaf(ico) + cpatch%broot(ico) &
-                 + cpatch%bsapwooda(ico) + cpatch%bsapwoodb(ico)
-
             !----- Get the carbon and nitrogen in vegetation. -----------------------------!
             veg_C8 = veg_C8 + area_factor                                                  &
                             * ( dble(cpatch%balive(ico)) + dble(cpatch%bdead(ico))         &

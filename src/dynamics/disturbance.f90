@@ -819,8 +819,6 @@ module disturbance_utils
 
     do ico = 1,cpatch%ncohorts
 
-       cpatch%balive(ico) = cpatch%bleaf(ico)+cpatch%bleaf(ico)+cpatch%bsapwooda(ico)+cpatch%bsapwoodb(ico)
-
        fast_litter = fast_litter + (1.0 - &
             survivorship(q,nat_dist_type,csite, cp, ico)) * &
             (f_labile(cpatch%pft(ico)) * cpatch%balive(ico) &
@@ -834,10 +832,8 @@ module disturbance_utils
 
        struct_cohort = cpatch%nplant(ico) *   &
             (1.0 - survivorship(q,nat_dist_type, csite, cp, ico)) * ( (1.0 -   &
-            loss_fraction ) * (cpatch%bdeada(ico)+cpatch%bdeadb(ico)) +   & ! DOUBLE CHECK THIS, IS THIS RIGHT??
-            (1.0 - f_labile(cpatch%pft(ico))) * &
-            (cpatch%bleaf(ico)+cpatch%broot(ico)+ &
-            cpatch%bsapwooda(ico)+cpatch%bsapwoodb(ico)))
+            loss_fraction ) * cpatch%bdead(ico) +   & ! DOUBLE CHECK THIS, IS THIS RIGHT??
+            (1.0 - f_labile(cpatch%pft(ico))) * cpatch%balive(ico))
 
        struct_litter = struct_litter + struct_cohort
        struct_lignin = struct_lignin + struct_cohort * l2n_stem / c2n_stem(cpatch%pft(ico))
@@ -904,7 +900,7 @@ module disturbance_utils
 
     use ed_state_vars,only : sitetype,patchtype
 
-    use pft_coms, only: q, qsw, sla, hgt_min, max_dbh, agf_bs
+    use pft_coms, only: q, qsw, sla, hgt_min, max_dbh
     use ed_misc_coms, only: dtlsm
     use fuse_fiss_utils, only : sort_cohorts
     use ed_therm_lib,only : calc_hcapveg
@@ -973,19 +969,13 @@ module disturbance_utils
     cpatch%phenology_status(nc) = 0
     salloc = 1.0 + q(cpatch%pft(nc)) + qsw(cpatch%pft(nc)) * cpatch%hite(nc)
     salloci = 1.0 / salloc
-    !! when starting new cohorts, assume they're **on allometry**
     cpatch%balive(nc)   = cpatch%bleaf(nc) * salloc
     cpatch%broot(nc)    = cpatch%balive(nc) * q(cpatch%pft(nc)) * salloci
     cpatch%bsapwood(nc) = cpatch%balive(nc) * qsw(cpatch%pft(nc))                &
                         * cpatch%hite(nc) * salloci
-    cpatch%bsapwooda(nc) = cpatch%bsapwood(nc)*agf_bs
-    cpatch%bsapwoodb(nc) = cpatch%bsapwood(nc) - cpatch%bsapwoodb(nc)
-    cpatch%bdeada(nc) = cpatch%bdead(nc)*agf_bs
-    cpatch%bdeadb(nc) = cpatch%bdead(nc) - cpatch%bdeadb(nc)
-
     cpatch%sla(nc)=sla(cpatch%pft(nc))
-    call area_indices(cpatch%nplant(nc),cpatch%bleaf(nc),cpatch%bdeada(nc)        &
-                     ,cpatch%bsapwooda(nc),cpatch%dbh(nc), cpatch%hite(nc)        &
+    call area_indices(cpatch%nplant(nc),cpatch%bleaf(nc),cpatch%bdead(nc)        &
+                     ,cpatch%balive(nc),cpatch%dbh(nc), cpatch%hite(nc)          &
                      ,cpatch%pft(nc),cpatch%sla(nc), cpatch%lai(nc)              &
                      ,cpatch%wpa(nc),cpatch%wai(nc))
 
@@ -994,7 +984,7 @@ module disturbance_utils
 
     !----- Finding the new basal area and above-ground biomass. ---------------------------!
     cpatch%basarea(nc) = pio4 * cpatch%dbh(nc) * cpatch%dbh(nc)                
-    cpatch%agb(nc)     = ed_biomass(cpatch%bdeada(nc),cpatch%bsapwooda(nc),cpatch%bleaf(nc)    &
+    cpatch%agb(nc)     = ed_biomass(cpatch%bdead(nc),cpatch%balive(nc),cpatch%bleaf(nc)    &
                                    ,cpatch%pft(nc),cpatch%hite(nc) ,cpatch%bstorage(nc))     
 
 
@@ -1006,8 +996,8 @@ module disturbance_utils
 
     !----- Because we assigned no water, the internal energy is simply hcapveg*T
 
-    cpatch%hcapveg(nc) = calc_hcapveg(cpatch%bleaf(nc),cpatch%bdeada(nc)   &
-                                     ,cpatch%bsapwooda(nc),cpatch%nplant(nc) &
+    cpatch%hcapveg(nc) = calc_hcapveg(cpatch%bleaf(nc),cpatch%bdead(nc)   &
+                                     ,cpatch%balive(nc),cpatch%nplant(nc) &
                                      ,cpatch%hite(nc),cpatch%pft(nc)      &
                                      ,cpatch%phenology_status(nc))
     
