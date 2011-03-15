@@ -107,7 +107,7 @@ recursive subroutine read_ed_xml_config(filename)
         if(texist) then 
            call libxml2f90__ll_getsize('extern',len)
            !----- MLO. Changed this to scalar so the interface check will work. -----------!
-           call libxml2f90__ll_getch('extern',len,cval)
+           call libxml2f90__ll_getch_scal('extern',len,cval)
            cval = cval(1:len)
            print*,"XML recursively loading ",trim(cval)
            call read_ed_xml_config(trim(cval))
@@ -770,6 +770,7 @@ recursive subroutine read_ed_xml_config(filename)
   init_stsl = -1.0
   init_fsn = -1.0
   init_msn = -1.0
+  
   print*,"INITCOND READ FROM FILE ::",ntag
   if(ntag .ge. 1) then
      do i=1,ntag

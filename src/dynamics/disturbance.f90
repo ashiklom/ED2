@@ -625,7 +625,10 @@ if(ianth_disturb > 0) then
             cpoly%loss_fraction(3,isi) = 0.0
             !------------------------------------------------------------------------------!
          else
-            cpoly%disturbance_rates(1:3,1:3,isi) = 0.0
+            !----- Set disturbance rates assuming only natural disturbance. ---------------!
+            cpoly%disturbance_rates(1:2,1:3,isi) = 0.0
+            cpoly%disturbance_rates(3,1,isi)     = 0.0
+            cpoly%disturbance_rates(3,2:3,isi)   = cpoly%nat_disturbance_rate(isi)
          endif
 
          end do siteloop
