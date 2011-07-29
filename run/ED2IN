@@ -271,8 +271,8 @@ $ED_NL
    ! FFILOUT -- Path and prefix for analysis files (all but history/restart).              !
    ! SFILOUT -- Path and prefix for history files.                                         !
    !---------------------------------------------------------------------------------------!
-   NL%FFILOUT = '/n/moorcroftfs1/nlevine/WaterStress/m34/TEST/analy/m34'
-   NL%SFILOUT = '/n/moorcroftfs1/nlevine/WaterStress/m34/TEST/histo/m34'
+   NL%FFILOUT = 'paththere/thisrun/analy/thispoly'
+   NL%SFILOUT = 'paththere/thisrun/histo/thispoly'
    !---------------------------------------------------------------------------------------!
 
 
@@ -541,7 +541,7 @@ $ED_NL
    !                  between 1.e-7 and 1.e-1, but recommended values are between 1.e-4    !
    !                  and 1.e-2.                                                           !
    !---------------------------------------------------------------------------------------!
-   NL%RK4_TOLERANCE  = 0.001
+   NL%RK4_TOLERANCE  = 0.01
    !---------------------------------------------------------------------------------------!
 
 
@@ -606,7 +606,7 @@ $ED_NL
    !               to have root depths of 5m and grasses/seedlings at 0.5 to have root     !
    !               depth of 0.5 m.                                                         !
    !---------------------------------------------------------------------------------------!
-   NL%IALLOM          = 2
+   NL%IALLOM          = 4
    !---------------------------------------------------------------------------------------!
 
 
@@ -671,7 +671,7 @@ $ED_NL
    !                     can't go outside their original polygon, though.  This is the     !
    !                     same as option 1 if there is only one site per polygon.           !
    !---------------------------------------------------------------------------------------!
-   NL%REPRO_SCHEME    = 1
+   NL%REPRO_SCHEME    = 2
    !---------------------------------------------------------------------------------------!
 
 
@@ -768,16 +768,16 @@ $ED_NL
    ! GGFACT    -- factor to multiply the ground to canopy conductance.  Default value      !
    !              is 1.0.                                                                  !
    !---------------------------------------------------------------------------------------!
-   NL%VMFACT          = 1.6
+   NL%VMFACT          = 1.40
    NL%MFACT           = 1.125
-   NL%KFACT           = 3.
+   NL%KFACT           = 3.00
    NL%GAMFACT         = 0.75
-   NL%D0FACT          = 1.00
-   NL%ALPHAFACT       = 1.00
-   NL%THETACRIT       = 0.20
-   NL%LWFACT          = 1.
-   NL%THIOFF          = 0.
-   NL%GGFACT          = 1.
+   NL%D0FACT          = 1.50
+   NL%ALPHAFACT       = 0.875
+   NL%THETACRIT       = 0.11
+   NL%LWFACT          = 1.00
+   NL%THIOFF          = 0.00
+   NL%GGFACT          = 1.00
    !---------------------------------------------------------------------------------------!
 
 
@@ -830,7 +830,7 @@ $ED_NL
    !                  set to 2.                                                            !
    !---------------------------------------------------------------------------------------!
    NL%INCLUDE_FIRE    = 2
-   NL%SM_FIRE         = 0.11
+   NL%SM_FIRE         = 0.08
    !---------------------------------------------------------------------------------------!
 
 
@@ -859,7 +859,7 @@ $ED_NL
    !             3.  This is also based on Massman (1997), but with the option of varying  !
    !                 the drag and sheltering within the canopy.                            !
    !---------------------------------------------------------------------------------------!
-   NL%ICANTURB        = 0
+   NL%ICANTURB        = 2
    !---------------------------------------------------------------------------------------!
 
 
@@ -933,8 +933,8 @@ $ED_NL
    ! RIBMAX      -- maximum bulk Richardson number.                                        !
    ! LEAF_MAXWHC -- Maximum water that can be intercepted by leaves, in kg/m2leaf.         !
    !---------------------------------------------------------------------------------------!
-   NL%GAMM            = 13.
-   NL%GAMH            = 13.
+   NL%GAMM            = 13.0
+   NL%GAMH            = 13.0
    NL%TPRANDTL        = 0.74
    NL%VH2VR           = 0.13
    NL%VH2DH           = 0.63
@@ -958,7 +958,7 @@ $ED_NL
    !            2.  Soil conductivity decreases with depth even for constant soil moisture !
    !                , otherwise it is the same as 1.                                       !
    !---------------------------------------------------------------------------------------!
-   NL%IPERCOL        = 0
+   NL%IPERCOL        = 1
    !---------------------------------------------------------------------------------------!
 
 
@@ -1069,7 +1069,7 @@ $ED_NL
    !                -folding lifetime" of the TSW in seconds due to runoff.  If you don't  !
    !                want runoff to happen, set this to 0.                                  !
    !---------------------------------------------------------------------------------------!
-   NL%RUNOFF_TIME    = 28800.0
+   NL%RUNOFF_TIME    = 3600.0
    !---------------------------------------------------------------------------------------!
 
 

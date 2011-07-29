@@ -210,7 +210,7 @@ fuse_fiss_utils.o: pft_coms.mod soil_coms.mod therm_lib.mod
 great_circle.o: consts_coms.mod
 hdf5_utils.o: hdf5_coms.mod
 invmondays.o: ed_misc_coms.mod
-lapse.o: consts_coms.mod ed_state_vars.mod met_driver_coms.mod
+lapse.o: consts_coms.mod ed_misc_coms.mod ed_state_vars.mod met_driver_coms.mod
 numutils.o: consts_coms.mod therm_lib.mod
 radiate_utils.o: canopy_radiation_coms.mod consts_coms.mod ed_misc_coms.mod
 radiate_utils.o: ed_state_vars.mod met_driver_coms.mod
@@ -222,7 +222,7 @@ update_derived_props.o: allometry.mod canopy_air_coms.mod consts_coms.mod
 update_derived_props.o: ed_misc_coms.mod ed_state_vars.mod ed_therm_lib.mod
 update_derived_props.o: fuse_fiss_utils.mod grid_coms.mod soil_coms.mod
 update_derived_props.o: therm_lib.mod
-utils_c.o: /n/Moorcroft_Lab/Users/mlongo/EDBRAMS/ED/src/include/utils_sub_names.h
+utils_c.o: /n/moorcroft_data/nlevine/repository/EDBRAMS/ED/src/include/utils_sub_names.h
 utils_c.o:
 allometry.mod: allometry.o
 an_header.mod: an_header.o
