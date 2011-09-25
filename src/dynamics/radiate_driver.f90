@@ -239,7 +239,7 @@ subroutine sfcrad_ed(cosz,cosaoi,csite,mzg,mzs,ntext_soil,ncol_soil,maxcohort,tu
    integer                                      :: ico
    integer                                      :: cohort_count
    integer                                      :: nsoil
-   integer                                      :: nscol
+   integer                                      :: colour
    integer                                      :: k
    integer                                      :: ksn
    real                                         :: fcpct
@@ -459,8 +459,8 @@ subroutine sfcrad_ed(cosz,cosaoi,csite,mzg,mzs,ntext_soil,ncol_soil,maxcohort,tu
       !                          / (soil(nsoil)%slmsts        - soil(nsoil)%soilcp) ) )
       !    alg   = soil(nsoil)%albdry + fcpct * (soil(nsoil)%albwet - soil(nsoil)%albdry)
       ! end select
-      nsoil = ntext_soil(mzg)
-      nscol = ncol_soil
+      nsoil  = ntext_soil(mzg)
+      colour = ncol_soil
       select case (nsoil)
       case (13)
          !----- Bedrock, use constants soil value for granite. ----------------------------!
@@ -472,16 +472,28 @@ subroutine sfcrad_ed(cosz,cosaoi,csite,mzg,mzs,ntext_soil,ncol_soil,maxcohort,tu
          albedo_soil_par   = max (0.07, 0.14 * (1.0 - fcpct))
          albedo_soil_nir   = albedo_soil_par
       case default
-         !---------------------------------------------------------------------------------!
-         !      Other soils, we use the soil numbers from CLM-4.  The colour class must be !
-         ! given at RAMSIN.  At this point the value is the same for all points, but in    !
-         ! the future we may read their files if the results are promising.                !
-         !---------------------------------------------------------------------------------!
-         fcpct           = max(0., 0.11 - 0.40 * csite%soil_water(mzg,ipa))
-         albedo_soil_par = min(soilcol(nscol)%alb_vis_dry                                  &
-                              ,soilcol(nscol)%alb_vis_wet  + fcpct)
-         albedo_soil_nir = min(soilcol(nscol)%alb_nir_dry                                  &
-                              ,soilcol(nscol)%alb_nir_wet  + fcpct)
+         select case (colour)
+         case (21)
+            !------------------------------------------------------------------------------!
+            !     ED-2.1 soil colour.  Also, we use the ED-2.1 default method to determine !
+            ! the albedo.                                                                  !
+            !------------------------------------------------------------------------------!
+            fcpct           = csite%soil_water(mzg,ipa) / soil(nsoil)%slmsts
+            albedo_soil_par = max(0.14,0.31-0.34*fcpct)
+            albedo_soil_nir = albedo_soil_par
+         case default
+            !------------------------------------------------------------------------------!
+            !      Other soils, we use the soil numbers from CLM-4.  The colour class must !
+            ! be given at RAMSIN.  At this point the value is the same for all points, but !
+            ! in the future we may read their files if the results are promising.          !
+            !------------------------------------------------------------------------------!
+            fcpct           = max(0., 0.11 - 0.40 * csite%soil_water(mzg,ipa))
+            albedo_soil_par = min(soilcol(colour)%alb_vis_dry                              &
+                                 ,soilcol(colour)%alb_vis_wet  + fcpct)
+            albedo_soil_nir = min(soilcol(colour)%alb_nir_dry                             &
+                                 ,soilcol(colour)%alb_nir_wet  + fcpct)
+            !------------------------------------------------------------------------------!
+         end select
          !---------------------------------------------------------------------------------!
       end select
       !------------------------------------------------------------------------------------!

@@ -30,7 +30,7 @@ module soil_coms
    integer, parameter :: ed_nvtyp = nvtyp+nvtyp_teb
 #else
    integer, parameter :: ed_nstyp = 17             ! total # of soil textural classes
-   integer, parameter :: ed_nscol = 20             ! total # of soil colour classes
+   integer, parameter :: ed_nscol = 21             ! total # of soil colour classes
    integer, parameter :: ed_nvtyp = 21
 #endif
 
@@ -200,7 +200,7 @@ module soil_coms
       real(kind=4) :: alb_nir_wet
    end type soilcol_class
    !----- To be filled in ed_params.f90. --------------------------------------------------!
-   type(soilcol_class), dimension(nscol) :: soilcol
+   type(soilcol_class), dimension(ed_nscol) :: soilcol
    !---------------------------------------------------------------------------------------!
 
 
