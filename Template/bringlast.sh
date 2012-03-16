@@ -29,66 +29,6 @@ let npolys=`wc -l ${lonlat} | awk '{print $1 }'`-3
 
 
 
-
-#----- Check that the user is aware that it will remove everything... ---------------------#
-if [ 'x'${1} == 'x-d' ]
-then
-   echo 'Are you sure that you want to remove all files and directories? [y/N]'
-else
-   echo 'Are you sure that you want to remove all files? [y/N]'
-fi
-read proceed
-if [ ${proceed} != 'y' -a ${proceed} != 'Y' ]
-then
-   exit
-fi
-#------------------------------------------------------------------------------------------#
-
-
-
-#----- Check that the user is aware that it will remove everything... ---------------------#
-echo ' '
-if [ 'x'${1} == 'x-d' ]
-then
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-   echo ' '
-   echo '     Look, this will REALLY delete all '${npolys}' output directories and files...'
-   echo ' '
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-else
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-   echo ' '
-   echo '     Look, this will REALLY delete all '${npolys}' output files...'
-echo ' '
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-   echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-fi
-
-echo 'This is PERMANENT, once they are gone, adieu, no chance to recover them!'
-echo 'Is that what you really want? [y/N]'
-read proceed
-
-echo ' '
-
-if [ ${proceed} != 'y' -a ${proceed} != 'Y' ]
-then 
-   exit
-fi
-
-echo 'Okay then, but if you regret later do not say that I did not warn you...'
-echo 'I am giving you a few seconds to kill this script in case you change your mind...'
-delfun=16
-while [ ${delfun} -gt 1 ]
-do
-   delfun=`expr ${delfun} - 1`
-   echo '  - Deletion will begin in '${delfun}' seconds...'
-   sleep 1
-done
-#------------------------------------------------------------------------------------------#
-
 #------------------------------------------------------------------------------------------#
 #     Loop over all polygons.                                                              #
 #------------------------------------------------------------------------------------------#
@@ -187,16 +127,10 @@ do
    #---------------------------------------------------------------------------------------#
 
 
-
-   if [ 'x'${1} == 'x-d' ]
-   then
-      rm -frv ${here}'/'${polyname} 
-      rm -frv ${there}'/'${polyname} 
-   else
-      cd ${here}'/'${polyname}
-      ./purge.sh
-      cd ${there}'/'${polyname}
-      ./purge.sh
-   fi
+   #----- Find out the last history file in the directory. --------------------------------#
+   lasthist=`ls -1 ${there}'/'${polyname}'/histo' | grep "\-S\-" | tail -1`
+   echo 'Bringing a copy of '${lasthist}' to the local disk...'
+   /bin/cp -u ${there}'/'${polyname}'/histo/'${lasthist} ${here}'/'${polyname}'/histo'
+   #---------------------------------------------------------------------------------------#
 done
 #------------------------------------------------------------------------------------------#
