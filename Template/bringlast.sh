@@ -1,42 +1,32 @@
 #!/bin/sh
 here=`pwd`
+moi=`whoami`
+diskthere='/n/moorcroftfs2'
 lonlat=${here}'/joborder.txt'
-desc=`basename ${here}`
+
+#----- Find the output path (both local and remote paths will be cleaned). ----------------#
+basehere=`basename ${here}`
+dirhere=`dirname ${here}`
+while [ ${basehere} != ${moi} ]
+do
+   basehere=`basename ${dirhere}`
+   dirhere=`dirname ${dirhere}`
+done
+diskhere=${dirhere}
+echo '-------------------------------------------------------------------------------'
+echo ' - Simulation control on disk: '${diskhere}
+echo ' - Output on disk:             '${diskthere}
+echo '-------------------------------------------------------------------------------'
+there=`echo ${here} | sed s@${diskhere}@${diskthere}@g`
+#------------------------------------------------------------------------------------------#
+
+
+
 
 #----- Determine the number of polygons to run. -------------------------------------------#
 let npolys=`wc -l ${lonlat} | awk '{print $1 }'`-3
+#------------------------------------------------------------------------------------------#
 
-echo 'Are you sure that you want to stop all jobs? [y/N]'
-read proceed
-
-if [ ${proceed} != 'y' -a ${proceed} != 'Y' ]
-then
-   exit
-fi
-
-echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-echo ' '
-echo '     Look, this will really stop ALL your jobs... Are you sure? [y/N]'
-echo ' '
-echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-read proceed
-
-if [ ${proceed} != 'y' -a ${proceed} != 'Y' ]
-then
-   exit
-fi
-
-echo 'Okay then, but if you regret later do not say that I did not warn you...'
-echo 'I am giving you a few seconds to kill this script in case you change your mind...'
-delfun=11
-while [ ${delfun} -gt 1 ]
-do
-   delfun=`expr ${delfun} - 1`
-   echo '  - Job stopping will begin in '${delfun}' seconds...'
-   sleep 1
-done
 
 
 #------------------------------------------------------------------------------------------#
@@ -47,7 +37,6 @@ while [ ${ff} -lt ${npolys} ]
 do
    let ff=${ff}+1
    let line=${ff}+3
-
    #---------------------------------------------------------------------------------------#
    #      Read the ffth line of the polygon list.  There must be smarter ways of doing     #
    # this, but this works.  Here we obtain the polygon name, and its longitude and         #
@@ -138,9 +127,11 @@ do
    irepro=`echo ${oi}       | awk '{print $82}'`
    #---------------------------------------------------------------------------------------#
 
-   bkill -J ${desc}-${polyname} -q ${queue}
+
+   #----- Find out the last history file in the directory. --------------------------------#
+   lasthist=`ls -1 ${there}'/'${polyname}'/histo' | grep "\-S\-" | tail -1`
+   echo 'Bringing a copy of '${lasthist}' to the local disk...'
+   /bin/cp -u ${there}'/'${polyname}'/histo/'${lasthist} ${here}'/'${polyname}'/histo'
+   #---------------------------------------------------------------------------------------#
 done
 #------------------------------------------------------------------------------------------#
-
-
-
