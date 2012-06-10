@@ -44,7 +44,6 @@ subroutine reproduction(cgrid, month)
    use allometry          , only : dbh2bd                   & ! function
                                  , size2bl                  & ! function
                                  , h2dbh                    & ! function
-                                 , size2bl                  & ! function
                                  , dbh2h                    & ! function
                                  , ed_biomass               & ! function
                                  , area_indices             & ! subroutine
@@ -178,12 +177,11 @@ subroutine reproduction(cgrid, month)
                         rectest%leaf_temp_pv=csite%can_temp(ipa)
                         rectest%wood_temp_pv=csite%can_temp(ipa)
                         
-                        !- recruits start at minimum height and dbh and bleaf are calculated from that
-                        rectest%hite      = hgt_min(ipft)
                         !------------------------------------------------------------------!
                         !    Recruits start at minimum height and dbh and bleaf are        !
                         ! calculated from that.                                            !
                         !------------------------------------------------------------------!
+                        rectest%hite      = hgt_min(ipft)
                         rectest%dbh       = h2dbh(rectest%hite, ipft)
                         rectest%krdepth   = dbh2krdepth(rectest%hite,rectest%dbh           &
                                                        ,rectest%pft,cpoly%lsl(isi))

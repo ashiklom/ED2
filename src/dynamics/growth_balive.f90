@@ -972,6 +972,8 @@ module growth_balive
             end if
             !------------------------------------------------------------------------------!
 
+
+
             !------------------------------------------------------------------------------!
             !     Update the carbon pools of the living tissues.                           !
             !------------------------------------------------------------------------------!
@@ -979,6 +981,7 @@ module growth_balive
             cpatch%broot    (ico) = cpatch%broot    (ico) + tr_broot
             cpatch%bsapwooda(ico) = cpatch%bsapwooda(ico) + tr_bsapwooda
             cpatch%bsapwoodb(ico) = cpatch%bsapwoodb(ico) + tr_bsapwoodb
+
             cpatch%balive   (ico) = cpatch%bleaf(ico) + cpatch%broot(ico)                  &
                                   + cpatch%bsapwooda(ico) + cpatch%bsapwoodb(ico)
             !------------------------------------------------------------------------------!
@@ -1638,6 +1641,7 @@ module growth_balive
             cpatch%broot    (ico) = cpatch%broot    (ico) + tr_broot
             cpatch%bsapwooda(ico) = cpatch%bsapwooda(ico) + tr_bsapwooda
             cpatch%bsapwoodb(ico) = cpatch%bsapwoodb(ico) + tr_bsapwoodb
+
             cpatch%balive(ico)   = cpatch%bleaf    (ico) + cpatch%broot    (ico)           &
                                  + cpatch%bsapwooda(ico) + cpatch%bsapwoodb(ico)
             

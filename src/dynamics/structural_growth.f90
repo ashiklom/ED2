@@ -148,14 +148,6 @@ subroutine structural_growth(cgrid, month)
                                              * cpatch%bstorage(ico) * cpatch%nplant(ico)
                end if
 
-               if (ibigleaf == 0 ) then
-                  !------ NPP allocation to wood and course roots in KgC /m2 --------------!
-                  cpatch%today_NPPwood(ico) = agf_bs(ipft)*f_bdead*cpatch%bstorage(ico)    &
-                                             * cpatch%nplant(ico)
-                  cpatch%today_NPPcroot(ico) = (1. - agf_bs(ipft)) * f_bdead               &
-                                             * cpatch%bstorage(ico) * cpatch%nplant(ico)
-               end if
-
                !---------------------------------------------------------------------------!
                !      Rebalance the plant nitrogen uptake considering the actual alloc-    !
                ! ation to structural growth.  This is necessary because c2n_stem does not  !

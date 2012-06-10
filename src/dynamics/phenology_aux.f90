@@ -465,7 +465,6 @@ module phenology_aux
       use phenology_coms, only : spot_phen           & ! intent(in)
                                , elongf_min          ! ! intent(in)
       use pft_coms      , only : phenology           & ! intent(in)
-                               , agf_bs              & ! intent(in)
                                , q                   & ! intent(in)
                                , qsw                 & ! intent(in)
                                , agf_bs              ! ! intent(in)
@@ -501,6 +500,10 @@ module phenology_aux
       real                                   :: psi_layer         ! Water pot. of this layer
       real                                   :: mcheight          ! Mid-crown height
       !------------------------------------------------------------------------------------!
+
+
+
+
       !------------------------------------------------------------------------------------!
       !     Here we decide how to compute the mean available water fraction.               !
       !------------------------------------------------------------------------------------!
@@ -517,7 +520,6 @@ module phenology_aux
             paw_avg   = paw_avg + max(0.0, (psi_layer - soil(nsoil)%slpotwp)) * dslz(k)               &
                                 / (soil(nsoil)%slpotld  - soil(nsoil)%slpotwp)
          end do
-
          paw_avg = paw_avg / abs(slz(kroot))
       else 
          !----- Use soil moisture (mass) to determine phenology. --------------------------!

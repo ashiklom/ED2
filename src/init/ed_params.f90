@@ -3383,13 +3383,6 @@ subroutine init_pft_derived_params()
       min_recruit_size(ipft) = min_plant_dens * one_plant_c(ipft)
       !------------------------------------------------------------------------------------!
 
-      write (unit=*,fmt='(a,1x,es12.4)') ' - min_recruit_size:    ',min_recruit_size(ipft)
-      write (unit=*,fmt='(a,1x,es12.4)') ' - min_plant_den:       ',min_plant_dens
-      write (unit=*,fmt='(a,1x,es12.4)') ' - balive_min:          ',balive_min
-      write (unit=*,fmt='(a,1x,es12.4)') ' - bdead_min:           ',bdead_min
-      write (unit=*,fmt='(a,1x,es12.4)') ' - dbh:                 ',dbh
-      write (unit=*,fmt='(a,1x,es12.4)') ' - bleaf_min:           ',bleaf_min
-
 
       !------------------------------------------------------------------------------------!
       !    Minimum size (measured as biomass of living and structural tissues) allowed in  !
