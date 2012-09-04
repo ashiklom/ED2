@@ -1426,7 +1426,7 @@ $ED_NL
    ! MON1ST_CENSUS   -- In which month was the first census conducted?                     !
    ! MIN_RECRUIT_DBH -- Minimum DBH that is measured in the census, in cm.                 !
    !---------------------------------------------------------------------------------------!
-   NL%DT_CENSUS       = 24
+   NL%DT_CENSUS       = 1.
    NL%YR1ST_CENSUS    = 1901
    NL%MON1ST_CENSUS   = 7
    NL%MIN_RECRUIT_DBH = 10
