@@ -78,6 +78,7 @@ subroutine lw_two_stream(grnd_emiss4,grnd_temp4,rlong_top4,ncoh,pft,lai,wai,cai,
    real(kind=8), dimension(ncoh+1)                         :: epsil
    real(kind=8), dimension(ncoh+1)                         :: iota
    real(kind=8), dimension(ncoh+1)                         :: lambda
+   real(kind=8)                                            :: temiss_four
    real(kind=8)                                            :: iota_g
    real(kind=8)                                            :: black_g
    real(kind=8)                                            :: down_sky
@@ -143,10 +144,14 @@ subroutine lw_two_stream(grnd_emiss4,grnd_temp4,rlong_top4,ncoh,pft,lai,wai,cai,
 
       !------------------------------------------------------------------------------------!
       !      Black is the emission of a black body at the same temperature of the layer.   !
-      !  We scale the emission with the weights.                                           !
+      !  The temperature is the weighted average where the weights are the product between !
+      !  the area and the emissivity.                                                      !
       !------------------------------------------------------------------------------------!
-      black(i) = cai(i) * stefan8 * ( leaf_weight(i) * leaf_temp(i) ** 4                      &
-                                    + wood_weight(i) * wood_temp(i) ** 4 )
+      temiss_four = ( leaf_weight(i) * leaf_emiss_tir(ipft) * leaf_temp(i) ** 4            &
+                    + wood_weight(i) * wood_emiss_tir(ipft) * wood_temp(i) ** 4 )          &
+                  / ( leaf_weight(i) * leaf_emiss_tir(ipft)                                &
+                    + wood_weight(i) * wood_emiss_tir(ipft) )
+      black(i) = cai(i) * stefan8 * temiss_four
       !------------------------------------------------------------------------------------!
 
 
@@ -155,8 +160,8 @@ subroutine lw_two_stream(grnd_emiss4,grnd_temp4,rlong_top4,ncoh,pft,lai,wai,cai,
       !      iota is the single scattering albedo.  Because we assume absorptivity to be   !
       ! the same as emissivity, we use the latter to define it.                            !
       !------------------------------------------------------------------------------------!
-      iota(i) = 1.d0 - ( leaf_weight(i) * leaf_emiss_tir(i)                                &
-                       + wood_weight(i) * wood_emiss_tir(i) )
+      iota(i) = 1.d0 - ( leaf_weight(i) * leaf_emiss_tir(ipft)                             &
+                       + wood_weight(i) * wood_emiss_tir(ipft) )
       !------------------------------------------------------------------------------------!
 
 

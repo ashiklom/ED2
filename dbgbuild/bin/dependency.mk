@@ -61,6 +61,8 @@ mortality.o: consts_coms.mod disturb_coms.mod ed_max_dims.mod ed_misc_coms.mod
 mortality.o: ed_state_vars.mod pft_coms.mod
 multiple_scatter.o: canopy_radiation_coms.mod consts_coms.mod ed_max_dims.mod
 multiple_scatter.o: rk4_coms.mod
+old_twostream_rad.o: canopy_radiation_coms.mod consts_coms.mod ed_max_dims.mod
+old_twostream_rad.o: rk4_coms.mod
 phenology_aux.o: allometry.mod consts_coms.mod ed_max_dims.mod ed_state_vars.mod
 phenology_aux.o: ed_therm_lib.mod grid_coms.mod pft_coms.mod phenology_coms.mod
 phenology_aux.o: soil_coms.mod
@@ -206,7 +208,7 @@ phenology_coms.o: ed_max_dims.mod
 physiology_coms.o: ed_max_dims.mod
 rk4_coms.o: consts_coms.mod ed_max_dims.mod ed_misc_coms.mod grid_coms.mod
 rk4_coms.o: soil_coms.mod therm_lib8.mod
-soil_coms.o: ed_max_dims.mod grid_coms.mod 
+soil_coms.o: consts_coms.mod ed_max_dims.mod grid_coms.mod 
 ed_mpass_init.o: canopy_air_coms.mod canopy_layer_coms.mod
 ed_mpass_init.o: canopy_radiation_coms.mod decomp_coms.mod detailed_coms.mod
 ed_mpass_init.o: disturb_coms.mod ed_max_dims.mod ed_misc_coms.mod
