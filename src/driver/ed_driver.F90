@@ -27,7 +27,9 @@ subroutine ed_driver()
    use phenology_aux     , only : first_phenology     ! ! subroutine
    implicit none
    !----- Included variables. -------------------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h' ! MPI commons
+#endif
    !----- Local variables. ----------------------------------------------------------------!
    character(len=12)           :: c0
    character(len=12)           :: c1
@@ -71,14 +73,20 @@ subroutine ed_driver()
    if (mynum == nnodetot-1) sendnum = 0
 
    if (mynum /= 1) then
+#if defined(RAMS_MPI)
       call MPI_RECV(ping,1,MPI_INTEGER,recvnum,80,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
    else
       write (unit=*,fmt='(a)') ' [+] Checking for XML config...'
    end if
+#else
+   write (unit=*,fmt='(a)') ' [+] Checking for XML config...'
+#endif
    call overwrite_with_xml_config(mynum)
    
+#if defined(RAMS_MPI)
    if (mynum < nnodetot ) call MPI_Send(ping,1,MPI_INTEGER,sendnum,80,MPI_COMM_WORLD,ierr)
    if (nnodetot /= 1 )    call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
    !---------------------------------------------------------------------------------------!
 
 
@@ -117,18 +125,24 @@ subroutine ed_driver()
       !------------------------------------------------------------------------------------!
       if (mynum == nnodetot-1) sendnum = 0
 
+#if defined(RAMS_MPI)
       if (mynum /= 1) then
          call MPI_RECV(ping,1,MPI_INTEGER,recvnum,81,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
       else
          write (unit=*,fmt='(a)') ' [+] Init_Full_History_Restart...'
       end if
+#else
+      write (unit=*,fmt='(a)') ' [+] Init_Full_History_Restart...'
+#endif
       call init_full_history_restart()
 
+#if defined(RAMS_MPI)
       if (mynum < nnodetot ) then
          call MPI_Send(ping,1,MPI_INTEGER,sendnum,81,MPI_COMM_WORLD,ierr)
       end if
 
       if (nnodetot /= 1 ) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
       !------------------------------------------------------------------------------------!
    else
 
@@ -157,22 +171,30 @@ subroutine ed_driver()
    !---------------------------------------------------------------------------------------!
    !      Initialize meteorological drivers.                                               !
    !---------------------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    if (nnodetot /= 1) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
    if (mynum == nnodetot-1) sendnum = 0
 
+#if defined(RAMS_MPI)
    if (mynum /= 1) then
       call MPI_RECV(ping,1,MPI_INTEGER,recvnum,82,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
    else
       write (unit=*,fmt='(a)') ' [+] Init_Met_Drivers...'
    end if
+#else
+   write (unit=*,fmt='(a)') ' [+] Init_Met_Drivers...'
+#endif
 
    call init_met_drivers()
    if (mynum == 1) write (unit=*,fmt='(a)') ' [+] Read_Met_Drivers_Init...'
    call read_met_drivers_init
 
 
+#if defined(RAMS_MPI)
    if (mynum < nnodetot ) call MPI_Send(ping,1,MPI_INTEGER,sendnum,82,MPI_COMM_WORLD,ierr)
    if (nnodetot /= 1 ) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
    !---------------------------------------------------------------------------------------!
 
 

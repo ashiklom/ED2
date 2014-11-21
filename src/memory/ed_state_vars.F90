@@ -758,9 +758,12 @@ module ed_state_vars
       !  AREA      -- patch area (relative to the total SITE area).                        !
       !  AGE       -- time since last disturbance (years)                                  !
       !  DIST_TYPE -- patch type                                                           !
-      !               1. Agriculture                                                       !
-      !               2. Secondary forest                                                  !
-      !               3. Primary forest                                                    !
+      !               1.  Clear cut (cropland and pasture).                                !
+      !               2.  Forest plantation.                                               !
+      !               3.  Tree fall.                                                       !
+      !               4.  Fire.                                                            !
+      !               5.  Forest regrowth.                                                 !
+      !               6.  Logged forest.                                                   !
       !------------------------------------------------------------------------------------!
       real   , pointer,dimension(:) :: area
       real   , pointer,dimension(:) :: age
@@ -791,9 +794,6 @@ module ed_state_vars
 
       ! Chill days --- number of days with average temperatures below 278.15 K
       real , pointer,dimension(:) :: sum_chd  
-
-      ! Flag specifying whether (1) or not (0) this patch is a plantation
-      integer , pointer,dimension(:) :: plantation
 
       ! Ice-vapour equivalent potential temperature of canopy air space [K]
       real , pointer,dimension(:) :: can_theiv
@@ -1690,6 +1690,14 @@ module ed_state_vars
       ! this density of plants [plants/m2]
       real,pointer,dimension(:) :: plantation_stocking_density
 
+      ! Target primary forest harvest for the current simulation year [kgC/m2].  
+      ! Initialized together with secondary memory in init_ed_site_vars().
+      real,pointer,dimension(:) :: primary_harvest_target
+     
+      ! Target secondary forest harvest for the current simulation year [kgC/m2].  
+      ! Initialized together with secondary memory in init_ed_site_vars().
+      real ,pointer,dimension(:):: secondary_harvest_target
+
       ! Unapplied primary forest harvest from previous years (save until 
       ! harvest is above minimum threshold.) [kgC/m2].  Initialized 
       ! together with secondary memory in init_ed_site_vars().
@@ -1703,8 +1711,6 @@ module ed_state_vars
       !-----------------------------------
       ! FIRE
       !-----------------------------------
-      ! site average fire disturbance rate
-      real,pointer,dimension(:) :: fire_disturbance_rate
       ! total fuel in the dry patches
       real,pointer,dimension(:) :: ignition_rate
 
@@ -1717,13 +1723,6 @@ module ed_state_vars
       !-----------------------------------
       ! DISTURBANCE
       !-----------------------------------
-      ! rate of natural disturbance
-      real,pointer, dimension(:) :: nat_disturbance_rate
-
-      ! disturbance dist_type id: 
-      !        dist_type = 0 if treefall was last disturbance
-      !        dist_type = 1 if fire was last disturbance
-      integer,pointer, dimension(:) :: nat_dist_type
 
       ! if new patch is less than min size, store information in the memory
       real,pointer, dimension(:,:,:) :: disturbance_memory !(n_dist_types,n_dist_types,nsites)
@@ -3655,15 +3654,14 @@ module ed_state_vars
       allocate(cpoly%agri_stocking_density         (                          nsites))
       allocate(cpoly%plantation_stocking_pft       (                          nsites))
       allocate(cpoly%plantation_stocking_density   (                          nsites))
+      allocate(cpoly%primary_harvest_target        (                          nsites))
+      allocate(cpoly%secondary_harvest_target      (                          nsites))
       allocate(cpoly%primary_harvest_memory        (                          nsites))
       allocate(cpoly%secondary_harvest_memory      (                          nsites))
-      allocate(cpoly%fire_disturbance_rate         (                          nsites))
       allocate(cpoly%ignition_rate                 (                          nsites))
       allocate(cpoly%lambda_fire                   (                       12,nsites))
       allocate(cpoly%avg_monthly_pcpg              (                       12,nsites))
       allocate(cpoly%phen_pars                     (                          nsites))
-      allocate(cpoly%nat_disturbance_rate          (                          nsites))
-      allocate(cpoly%nat_dist_type                 (                          nsites))
       allocate(cpoly%disturbance_memory            (n_dist_types,n_dist_types,nsites))
       allocate(cpoly%disturbance_rates             (n_dist_types,n_dist_types,nsites))
       allocate(cpoly%green_leaf_factor             (                    n_pft,nsites))
@@ -3833,7 +3831,6 @@ module ed_state_vars
       allocate(csite%fast_soil_N                   (              npatches))
       allocate(csite%sum_dgd                       (              npatches))
       allocate(csite%sum_chd                       (              npatches))
-      allocate(csite%plantation                    (              npatches))
       allocate(csite%can_theiv                     (              npatches))
       allocate(csite%can_vpdef                     (              npatches))
       allocate(csite%can_temp                      (              npatches))
@@ -5401,15 +5398,14 @@ module ed_state_vars
       nullify(cpoly%agri_stocking_density      )
       nullify(cpoly%plantation_stocking_pft    )
       nullify(cpoly%plantation_stocking_density)
+      nullify(cpoly%primary_harvest_target     )
+      nullify(cpoly%secondary_harvest_target   )
       nullify(cpoly%primary_harvest_memory     )
       nullify(cpoly%secondary_harvest_memory   )
-      nullify(cpoly%fire_disturbance_rate      )
       nullify(cpoly%ignition_rate              )
       nullify(cpoly%lambda_fire                )
       nullify(cpoly%avg_monthly_pcpg           )
       nullify(cpoly%phen_pars                  )
-      nullify(cpoly%nat_disturbance_rate       )
-      nullify(cpoly%nat_dist_type              )
       nullify(cpoly%disturbance_memory         )
       nullify(cpoly%disturbance_rates          )
       nullify(cpoly%green_leaf_factor          )
@@ -5532,7 +5528,6 @@ module ed_state_vars
       nullify(csite%fast_soil_N                )
       nullify(csite%sum_dgd                    )
       nullify(csite%sum_chd                    )
-      nullify(csite%plantation                 )
       nullify(csite%can_theiv                  )
       nullify(csite%can_vpdef                  )
       nullify(csite%can_temp                   )
@@ -7085,17 +7080,18 @@ module ed_state_vars
                                               deallocate(cpoly%plantation_stocking_pft    )
       if(associated(cpoly%plantation_stocking_density))                                    &
                                               deallocate(cpoly%plantation_stocking_density)
+      if(associated(cpoly%primary_harvest_target     ))                                    &
+                                              deallocate(cpoly%primary_harvest_target     )
+      if(associated(cpoly%secondary_harvest_target   ))                                    &
+                                              deallocate(cpoly%secondary_harvest_target   )
       if(associated(cpoly%primary_harvest_memory     ))                                    &
                                               deallocate(cpoly%primary_harvest_memory     )
       if(associated(cpoly%secondary_harvest_memory   ))                                    &
                                               deallocate(cpoly%secondary_harvest_memory   )
-      if(associated(cpoly%fire_disturbance_rate )) deallocate(cpoly%fire_disturbance_rate )
       if(associated(cpoly%ignition_rate         )) deallocate(cpoly%ignition_rate         )
       if(associated(cpoly%lambda_fire           )) deallocate(cpoly%lambda_fire           )
       if(associated(cpoly%avg_monthly_pcpg      )) deallocate(cpoly%avg_monthly_pcpg      )
       if(associated(cpoly%phen_pars             )) deallocate(cpoly%phen_pars             )
-      if(associated(cpoly%nat_disturbance_rate  )) deallocate(cpoly%nat_disturbance_rate  )
-      if(associated(cpoly%nat_dist_type         )) deallocate(cpoly%nat_dist_type         )
       if(associated(cpoly%disturbance_memory    )) deallocate(cpoly%disturbance_memory    )
       if(associated(cpoly%disturbance_rates     )) deallocate(cpoly%disturbance_rates     )
       if(associated(cpoly%green_leaf_factor     )) deallocate(cpoly%green_leaf_factor     )
@@ -7228,7 +7224,6 @@ module ed_state_vars
       if(associated(csite%fast_soil_N           )) deallocate(csite%fast_soil_N           )
       if(associated(csite%sum_dgd               )) deallocate(csite%sum_dgd               )
       if(associated(csite%sum_chd               )) deallocate(csite%sum_chd               )
-      if(associated(csite%plantation            )) deallocate(csite%plantation            )
       if(associated(csite%can_theiv             )) deallocate(csite%can_theiv             )
       if(associated(csite%can_vpdef             )) deallocate(csite%can_vpdef             )
       if(associated(csite%can_temp              )) deallocate(csite%can_temp              )
@@ -8115,7 +8110,6 @@ module ed_state_vars
          osite%fast_soil_N                (opa) = isite%fast_soil_N                (ipa)
          osite%sum_dgd                    (opa) = isite%sum_dgd                    (ipa)
          osite%sum_chd                    (opa) = isite%sum_chd                    (ipa)
-         osite%plantation                 (opa) = isite%plantation                 (ipa)
          osite%can_theiv                  (opa) = isite%can_theiv                  (ipa)
          osite%can_vpdef                  (opa) = isite%can_vpdef                  (ipa)
          osite%can_temp                   (opa) = isite%can_temp                   (ipa)
@@ -8692,6 +8686,7 @@ module ed_state_vars
       end do
       !------------------------------------------------------------------------------------!
 
+
       !------------------------------------------------------------------------------------!
       !      We break the subroutines into smaller pieces so Fortran doesn't complain...   !
       !------------------------------------------------------------------------------------!
@@ -8699,7 +8694,7 @@ module ed_state_vars
       call copy_sitetype_mask_fmean(isite,osite,z,lmask,isize,osize)
       if (writing_long) call copy_sitetype_mask_dmean(isite,osite,z,lmask,isize,osize)
       if (writing_eorq) call copy_sitetype_mask_mmean(isite,osite,z,lmask,isize,osize)
-      if (writing_dcyc) call copy_sitetype_mask_qmean(isite,osite,z,lmask,isize,osize)
+      if (writing_eorq) call copy_sitetype_mask_qmean(isite,osite,z,lmask,isize,osize)
       !------------------------------------------------------------------------------------!
 
       return
@@ -8752,7 +8747,6 @@ module ed_state_vars
       osite%fast_soil_N               (1:z) = pack(isite%fast_soil_N               ,lmask)
       osite%sum_dgd                   (1:z) = pack(isite%sum_dgd                   ,lmask)
       osite%sum_chd                   (1:z) = pack(isite%sum_chd                   ,lmask)
-      osite%plantation                (1:z) = pack(isite%plantation                ,lmask)
       osite%can_theiv                 (1:z) = pack(isite%can_theiv                 ,lmask)
       osite%can_vpdef                 (1:z) = pack(isite%can_vpdef                 ,lmask)
       osite%can_temp                  (1:z) = pack(isite%can_temp                  ,lmask)
@@ -9293,6 +9287,8 @@ module ed_state_vars
       integer                                      :: m
       integer                                      :: n
       !------------------------------------------------------------------------------------!
+
+
 
       do n=1,ndcycle
          !----- Scalars. ------------------------------------------------------------------!
@@ -10635,7 +10631,9 @@ module ed_state_vars
                               , maxmach                  ! ! intent(in)
       implicit none
 
+#if defined(RAMS_MPI)
       include 'mpif.h'
+#endif
       !----- Local variables. -------------------------------------------------------------!
       type(edtype)                                 , pointer   :: cgrid
       type(polygontype)                            , pointer   :: cpoly
@@ -10652,7 +10650,9 @@ module ed_state_vars
       integer                                                  :: ierr
       integer                                                  :: nm
       integer                                                  :: iptr
+#if defined(RAMS_MPI)
       integer          , dimension(MPI_STATUS_SIZE)            :: status
+#endif
       integer                                                  :: ping
       integer                                                  :: uniqueid
       !----- Local constants. -------------------------------------------------------------!
@@ -10703,6 +10703,7 @@ module ed_state_vars
                gdpa(1,igr) = cgrid%npatches_global
                gdco(1,igr) = cgrid%ncohorts_global
 
+#if defined(RAMS_MPI)
                call MPI_Send(ping,1,MPI_INTEGER,sendnum,94,MPI_COMM_WORLD,ierr)
                
                !----- Have node 1 recieve the info. ---------------------------------------!
@@ -10734,8 +10735,10 @@ module ed_state_vars
                                ,1200000+uniqueid,MPI_COMM_WORLD,ierr)
                end do
                !---------------------------------------------------------------------------!
+#endif
             else
 
+#if defined(RAMS_MPI)
                !----- Set the blocking receive to allow ordering, start with machine 1. ---!
                call MPI_Recv(ping,1,MPI_INTEGER,recvnum,94,MPI_COMM_WORLD,status,ierr)
                !---------------------------------------------------------------------------!
@@ -10771,6 +10774,9 @@ module ed_state_vars
                call MPI_Recv(gdco,maxmach*maxgrds,MPI_INTEGER,machs(1)                     &
                             ,1200000+uniqueid,MPI_COMM_WORLD,status,ierr)
                !---------------------------------------------------------------------------!
+#else
+               continue
+#endif
             end if
             !------------------------------------------------------------------------------!
 
@@ -17679,14 +17685,7 @@ module ed_state_vars
            var_len,var_len_global,max_ptrs,'PLANTATION_STOCKING_PFT :20:hist') 
          call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
       end if
-
-      if (associated(cpoly%nat_dist_type)) then
-         nvar=nvar+1
-           call vtable_edio_i(npts,cpoly%nat_dist_type,nvar,igr,init,cpoly%siglob_id, &
-           var_len,var_len_global,max_ptrs,'NAT_DIST_TYPE :20:hist') 
-         call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
-      end if
-      !------------------------------------------------------------------------------------!
+     !------------------------------------------------------------------------------------!
 
       return
    end subroutine filltab_polygontype_p20
@@ -17837,38 +17836,38 @@ module ed_state_vars
          call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
       end if
 
+      if (associated(cpoly%primary_harvest_target)) then
+         nvar=nvar+1
+           call vtable_edio_r(npts,cpoly%primary_harvest_target,nvar,igr,init,cpoly%siglob_id, &
+           var_len,var_len_global,max_ptrs,'PRIMARY_HARVEST_TARGET :21:hist') 
+         call metadata_edio(nvar,igr,'Target biomass to be harvest from primary vegetation','[kgC/m2]','(isite)') 
+      end if
+
+      if (associated(cpoly%secondary_harvest_target)) then
+         nvar=nvar+1
+           call vtable_edio_r(npts,cpoly%secondary_harvest_target,nvar,igr,init,cpoly%siglob_id, &
+           var_len,var_len_global,max_ptrs,'SECONDARY_HARVEST_TARGET:21:hist') 
+         call metadata_edio(nvar,igr,'Target biomass to be harvest from secondary vegetation','[kgC/m2]','(isite)') 
+      end if
+
       if (associated(cpoly%primary_harvest_memory)) then
          nvar=nvar+1
            call vtable_edio_r(npts,cpoly%primary_harvest_memory,nvar,igr,init,cpoly%siglob_id, &
            var_len,var_len_global,max_ptrs,'PRIMARY_HARVEST_MEMORY :21:hist') 
-         call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
+         call metadata_edio(nvar,igr,'Harvest debt from primary vegetation','[kgC/m2]','(isite)') 
       end if
 
       if (associated(cpoly%secondary_harvest_memory)) then
          nvar=nvar+1
            call vtable_edio_r(npts,cpoly%secondary_harvest_memory,nvar,igr,init,cpoly%siglob_id, &
            var_len,var_len_global,max_ptrs,'SECONDARY_HARVEST_MEMORY:21:hist') 
-         call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
-      end if
-
-      if (associated(cpoly%fire_disturbance_rate)) then
-         nvar=nvar+1
-           call vtable_edio_r(npts,cpoly%fire_disturbance_rate,nvar,igr,init,cpoly%siglob_id, &
-           var_len,var_len_global,max_ptrs,'FIRE_DISTURBANCE_RATE :21:hist') 
-         call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
+         call metadata_edio(nvar,igr,'Harvest debt from secondary vegetation','[kgC/m2]','(isite)') 
       end if
 
       if (associated(cpoly%ignition_rate)) then
          nvar=nvar+1
            call vtable_edio_r(npts,cpoly%ignition_rate,nvar,igr,init,cpoly%siglob_id, &
            var_len,var_len_global,max_ptrs,'IGNITION_RATE :21:hist:mont:dcyc') 
-         call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
-      end if
-
-      if (associated(cpoly%nat_disturbance_rate)) then
-         nvar=nvar+1
-           call vtable_edio_r(npts,cpoly%nat_disturbance_rate,nvar,igr,init,cpoly%siglob_id, &
-           var_len,var_len_global,max_ptrs,'NAT_DISTURBANCE_RATE :21:hist') 
          call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
       end if
 
@@ -19217,13 +19216,6 @@ module ed_state_vars
          nvar=nvar+1
            call vtable_edio_i(npts,csite%dist_type,nvar,igr,init,csite%paglob_id, &
            var_len,var_len_global,max_ptrs,'DIST_TYPE :30:hist:anal:dail:mont:dcyc:year') 
-         call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
-      end if
-
-      if (associated(csite%plantation)) then
-         nvar=nvar+1
-           call vtable_edio_i(npts,csite%plantation,nvar,igr,init,csite%paglob_id, &
-           var_len,var_len_global,max_ptrs,'PLANTATION :30:hist') 
          call metadata_edio(nvar,igr,'No metadata available','[NA]','NA') 
       end if
 

@@ -18,10 +18,15 @@ subroutine fatal_error(reason,subr,file)
    logical                      :: slavenode
    !---------------------------------------------------------------------------------------!
 
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
 
-   !------ Check which type of end we should use. -----------------------------------------!
-   if (trim(file) == 'edmain.f90' .or. trim(file) == 'rammain.f90') then
+   !---------------------------------------------------------------------------------------!
+   !       Check which type of end we should use.  For the main program, this should never !
+   ! attempt to reference the parallel stuff.                                              !
+   !---------------------------------------------------------------------------------------!
+   if (trim(file) == 'edmain.F90' .or. trim(file) == 'rammain.F90') then
       parallel  = .false.
       slavenode = .false.
    else
@@ -52,7 +57,9 @@ subroutine fatal_error(reason,subr,file)
    !---------------------------------------------------------------------------------------!
    !     Remind the user of deprecated ED2IN choices...                                    !
    !---------------------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    if (parallel) call MPI_Abort(MPI_COMM_WORLD, 1)
+#endif
    stop 'fatal_error'
 end subroutine fatal_error
 !==========================================================================================!
@@ -72,7 +79,6 @@ subroutine opspec_fatal(reason,opssub)
    implicit none
    character(len=*), intent(in) :: reason,opssub
 
-   include 'mpif.h'
    write (unit=*,fmt='(a)')       ' '
    write (unit=*,fmt='(a)')       '------------------------------------------------------'
    write (unit=*,fmt='(3(a,1x))') '>>>> ',trim(opssub),' error! in your namelist!'
@@ -99,8 +105,6 @@ subroutine warning(reason,subr,file)
    implicit none
    character(len=*), intent(in) :: reason
    character(len=*), intent(in) :: subr,file
-
-   include 'mpif.h'
   
    write(unit=*,fmt='(a)') '::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::'
    write(unit=*,fmt='(a)') '::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::'

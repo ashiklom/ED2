@@ -78,7 +78,9 @@ subroutine ed_model()
                             , zero_ed_yearly_vars         ! ! sub-routine
    implicit none
    !----- Common blocks. ------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !----- Local variables. ----------------------------------------------------------------!
    character(len=28)  :: fmthead
    character(len=32)  :: fmtcntr
@@ -407,7 +409,9 @@ subroutine ed_model()
                   write(unit=*,fmt='(a,1x,i5,1x,a,1x,f7.1)') 'Node',mynum                  &
                                                             ,'time', walltime(wtime_start)
                end if
+#if defined(RAMS_MPI)
                call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
                if (mynum == 1) write(unit=*,fmt='(a)') '-- Synchronized.'
             end if
 

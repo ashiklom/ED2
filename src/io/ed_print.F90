@@ -32,12 +32,16 @@ subroutine print_fields(ifm,cgrid)
    use ed_max_dims  , only : str_len_short ! ! intent(in)
    implicit none
    !----- Standard common blocks. ---------------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !----- Arguments. ----------------------------------------------------------------------!
    integer                            , intent(in) :: ifm
    type(edtype)                       , target     :: cgrid
    !----- Local variables. ----------------------------------------------------------------!
+#if defined(RAMS_MPI)
    integer, dimension(MPI_STATUS_SIZE)             :: status
+#endif
    real   , dimension(:)              , pointer    :: pvar_l
    real   , dimension(:)              , pointer    :: pvar_g
    character(len=30)                               :: fmtstr
@@ -117,7 +121,9 @@ subroutine print_fields(ifm,cgrid)
          exit count_pvars
       endif
 
+#if defined(RAMS_MPI)
       if (nnodetot /= 1) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
       pvartrue = .false.
       do nv = 1,num_var(ifm)
@@ -139,6 +145,7 @@ subroutine print_fields(ifm,cgrid)
                   write(unit=*,fmt='(3a)') ' =========== ',trim(pvar_name),' =========== '
                   write(unit=*,fmt='( a)') ' '
 
+#if defined(RAMS_MPI)
                   do nm = 1,nnodetot-1
 
                      call MPI_Recv(ptr_recv,1,MPI_LOGICAL,machs(nm),120,MPI_COMM_WORLD     &
@@ -155,6 +162,7 @@ subroutine print_fields(ifm,cgrid)
                                      ,mast_idmax-mast_idmin+1,MPI_REAL                     &
                                      ,machs(nm),123,MPI_COMM_WORLD,status,ierr)
                      end if
+#endif
 
                   end do
                end if
@@ -179,9 +187,11 @@ subroutine print_fields(ifm,cgrid)
             !----- This is scratch space that all machines will use. ----------------------!
             pvar_l = undef
             !----- Set the blocking recieve to allow ordering, start with machine 1. ------!
+#if defined(RAMS_MPI)
             if (mynum /= 1) then
                call MPI_Recv(ping,1,MPI_INTEGER,recvnum,93,MPI_COMM_WORLD,status,ierr)
             end if
+#endif
 
             !------------------------------------------------------------------------------!
             !     Cycle through this node's pointers for the current variable.  If the     !
@@ -236,7 +246,7 @@ subroutine print_fields(ifm,cgrid)
                      write(unit=*,fmt='(a,1x,i5)') ' G_IDSIZE = ',g_idmax - g_idmin + 1
                      write(unit=*,fmt='(a)'      ) '--------------------------------------'
                      call fatal_error('L_IDSIZE and G_IDSIZE don''t match!'                &
-                                     ,'print_fields','ed_print.f90')
+                                     ,'print_fields','ed_print.F90')
                   end if
                   !------------------------------------------------------------------------!
 
@@ -278,6 +288,7 @@ subroutine print_fields(ifm,cgrid)
                   !      Slave node.  The local array for this machine has been created.   !
                   ! Send it off to the master.                                             !
                   !------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
 
                   call MPI_Send(ptr_send,1,MPI_LOGICAL,machs(nnodetot),120,MPI_COMM_WORLD  &
                                ,ierr)
@@ -299,6 +310,9 @@ subroutine print_fields(ifm,cgrid)
                   ! machine.                                                               !
                   !------------------------------------------------------------------------!
                   call MPI_Send(ping,1,MPI_INTEGER,sendnum,93,MPI_COMM_WORLD,ierr)
+#else
+                  continue
+#endif
 
                else
                   !----- Master node, just copy the local array to the global. ------------!
@@ -354,7 +368,9 @@ subroutine print_fields(ifm,cgrid)
 
 
    !----- Don't proceed until everything is written out. ----------------------------------!
+#if defined(RAMS_MPI)
    if (nnodetot /= 1) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
    !---------------------------------------------------------------------------------------!
 
    return

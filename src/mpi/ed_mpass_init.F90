@@ -9,7 +9,9 @@ subroutine ed_masterput_processid(nproc,headnode_num,masterworks,par_run)
 
    implicit none
    integer :: headnode_num,nproc
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    integer :: nm
    integer :: ierr
    integer :: par_run
@@ -41,6 +43,7 @@ subroutine ed_masterput_processid(nproc,headnode_num,masterworks,par_run)
 
    machs(machsize)=0  !Thats me!!
 
+#if defined(RAMS_MPI)
    do nm=1,nmachs
      call MPI_Send(mainnum,1,MPI_INTEGER,machnum(nm),311,MPI_COMM_WORLD,ierr)
      call MPI_Send(machnum(nm),1,MPI_INTEGER,machnum(nm),312,MPI_COMM_WORLD,ierr)
@@ -49,6 +52,7 @@ subroutine ed_masterput_processid(nproc,headnode_num,masterworks,par_run)
      call MPI_Send(machnum,nmachs,MPI_INTEGER,machnum(nm),315,MPI_COMM_WORLD,ierr)
      call MPI_Send(machsize,1,MPI_INTEGER,machnum(nm),316,MPI_COMM_WORLD,ierr)
    enddo
+#endif
 
 
 
@@ -296,13 +300,16 @@ subroutine ed_masterput_nl(par_run)
                                    , idetailed                  & ! intent(in)
                                    , patch_keep                 ! ! intent(in)
    implicit none
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    integer :: ierr
    integer :: par_run
    integer :: n
    if (par_run == 0 ) return
 
    !----- First, the namelist-derived type, before I forget... ----------------------------!
+#if defined(RAMS_MPI)
    call MPI_Bcast(ngrids,1,MPI_INTEGER,mainnum,MPI_COMM_WORLD,ierr)
    call MPI_Bcast(time,1,MPI_DOUBLE_PRECISION,mainnum,MPI_COMM_WORLD,ierr)
    call MPI_Bcast(timmax,1,MPI_DOUBLE_PRECISION,mainnum,MPI_COMM_WORLD,ierr)
@@ -573,6 +580,7 @@ subroutine ed_masterput_nl(par_run)
    call MPI_Barrier(MPI_COMM_WORLD,ierr) ! Just to wait until the matrix is allocated
    call MPI_Bcast(layer_index,nlat_lyr*nlon_lyr,MPI_INTEGER,mainnum,MPI_COMM_WORLD,ierr)
    !---------------------------------------------------------------------------------------!
+#endif
 
    return
 end subroutine ed_masterput_nl
@@ -612,7 +620,9 @@ subroutine ed_masterput_met_header(par_run)
    
    implicit none
    !------ Pre-compiled options. ----------------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !------ Arguments. ---------------------------------------------------------------------!
    integer                      , intent(in)   :: par_run
    !------ Local variables. ---------------------------------------------------------------!
@@ -627,6 +637,7 @@ subroutine ed_masterput_met_header(par_run)
    if (par_run == 0) return
    !---------------------------------------------------------------------------------------!
 
+#if defined(RAMS_MPI)
    nsize=nformats*max_met_vars
 
 
@@ -665,6 +676,7 @@ subroutine ed_masterput_met_header(par_run)
    
    call MPI_Bcast(met_frq,nsize,MPI_REAL,mainnum,MPI_COMM_WORLD,ierr)
    call MPI_Bcast(met_interp,nsize,MPI_INTEGER,mainnum,MPI_COMM_WORLD,ierr)
+#endif
 
    return
 end subroutine ed_masterput_met_header
@@ -692,7 +704,9 @@ subroutine ed_masterput_poly_dims(par_run,masterworks)
    use mem_polygons  , only : n_ed_region  & ! intent(in)
                             , n_poi        ! ! intent(in)
    implicit none
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !----- Local constants. ----------------------------------------------------------------!
    integer                     , parameter   :: nmethods = 3
    !----- Arguments. ----------------------------------------------------------------------!
@@ -754,7 +768,7 @@ subroutine ed_masterput_poly_dims(par_run,masterworks)
       write (unit=*,fmt='(a)') '                                                                    '
       write (unit=*,fmt='(a)') '--------------------------------------------------------------------' 
       call fatal_error('Parallel version of POI runs not available.'                       &
-                      , 'ed_masterput_poly_dims','ed_mpass_init.f90')
+                      , 'ed_masterput_poly_dims','ed_mpass_init.F90')
    end if
   
 
@@ -829,7 +843,7 @@ subroutine ed_masterput_poly_dims(par_run,masterworks)
             write (unit=*,fmt='(a,1x,i6)') ' Max. # of nodes needed     :',maxnmachs 
             write (unit=*,fmt='(a)') '----------------------------------------------------'
             call fatal_error('Requested number of nodes exceeds the maximum needed.'       &
-                            ,'ed_masterput_poly_dims','ed_mpass_init.f90')
+                            ,'ed_masterput_poly_dims','ed_mpass_init.F90')
          end if
 
 
@@ -948,8 +962,10 @@ subroutine ed_masterput_poly_dims(par_run,masterworks)
          do imach=1,nmachs
             gdpy  (imach,ifm) = mpolys (imach)
             py_off(imach,ifm) = moffset(imach)
+#if defined(RAMS_MPI)
             call MPI_Bcast(mpolys (imach),1,MPI_INTEGER,mainnum,MPI_COMM_WORLD,ierr)
             call MPI_Bcast(moffset(imach),1,MPI_INTEGER,mainnum,MPI_COMM_WORLD,ierr)
+#endif
          end do
 
          !----- Getting the message about this node itself. -------------------------------!
@@ -1003,7 +1019,9 @@ subroutine ed_masterput_worklist_info(par_run)
    use ed_mem_alloc , only : ed_memory_allocation  ! ! subroutine
    implicit none
    !------ Pre-compiled options. ----------------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !------ Arguments. ---------------------------------------------------------------------!
    integer                      , intent(in)   :: par_run
    !------ Local variables. ---------------------------------------------------------------!
@@ -1022,6 +1040,7 @@ subroutine ed_masterput_worklist_info(par_run)
    !---------------------------------------------------------------------------------------!
    
 
+#if defined(RAMS_MPI)
    if (par_run == 1) then
       
       do nm=1,nmachs
@@ -1084,6 +1103,7 @@ subroutine ed_masterput_worklist_info(par_run)
          end do
       end do
    end if
+#endif
    !---------------------------------------------------------------------------------------!
 
 
@@ -1175,10 +1195,13 @@ subroutine ed_nodeget_processid(init)
   implicit none
   integer :: init
 
+#if defined(RAMS_MPI)
   include 'mpif.h'
   integer, dimension(MPI_STATUS_SIZE) :: status
+#endif
   integer :: ierr
 
+#if defined(RAMS_MPI)
   if(init == 1) then
      
      call MPI_Recv(master_num,1,MPI_INTEGER,0,311,MPI_COMM_WORLD,status,ierr)
@@ -1193,6 +1216,7 @@ subroutine ed_nodeget_processid(init)
      if (mynum == nmachs) sendnum=0
   endif
   write(unit=*,fmt='(a,1x,i5,1x,a)') '---> Node',mynum,'got first message!'
+#endif
 
   return
 end subroutine ed_nodeget_processid
@@ -1438,11 +1462,14 @@ subroutine ed_nodeget_nl
                                    , idetailed                  & ! intent(out)
                                    , patch_keep                 ! ! intent(out)
    implicit none
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    integer :: ierr
    integer :: n
 
 !----- First, the namelist-derived type, before I forget... -------------------------------!
+#if defined(RAMS_MPI)
    call MPI_Bcast(ngrids,1,MPI_INTEGER,master_num,MPI_COMM_WORLD,ierr)
    call MPI_Bcast(time,1,MPI_DOUBLE_PRECISION,master_num,MPI_COMM_WORLD,ierr)
    call MPI_Bcast(timmax,1,MPI_DOUBLE_PRECISION,master_num,MPI_COMM_WORLD,ierr)
@@ -1724,6 +1751,7 @@ subroutine ed_nodeget_nl
    call MPI_Barrier(MPI_COMM_WORLD,ierr) ! Safe to receive the data.
    call MPI_Bcast(layer_index,nlat_lyr*nlon_lyr,MPI_INTEGER,master_num,MPI_COMM_WORLD,ierr)
    !---------------------------------------------------------------------------------------!
+#endif
 
    return
 end subroutine ed_nodeget_nl
@@ -1750,11 +1778,14 @@ subroutine ed_nodeget_met_header()
         metname_len,metvars_len
 
    implicit none
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    integer             :: ierr, nsize,f,v
 
    
 
+#if defined(RAMS_MPI)
 !----- First I get the scalars ------------------------------------------------------------!
    call MPI_Bcast (nformats,1,MPI_INTEGER,master_num,MPI_COMM_WORLD,ierr)
 
@@ -1801,6 +1832,7 @@ subroutine ed_nodeget_met_header()
    
    call MPI_Bcast(met_frq,nsize,MPI_REAL,master_num,MPI_COMM_WORLD,ierr)
    call MPI_Bcast(met_interp,nsize,MPI_INTEGER,master_num,MPI_COMM_WORLD,ierr)
+#endif
 
    return
 end subroutine ed_nodeget_met_header
@@ -1815,16 +1847,20 @@ subroutine ed_nodeget_poly_dims
    use ed_node_coms, only: master_num,nmachs,mynum
    use grid_coms, only: ngrids
    implicit none
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    integer :: ierr
    integer :: ifm,nm
   
+#if defined(RAMS_MPI)
    do ifm=1,ngrids
       do nm=1,nmachs
          call MPI_Bcast(gdpy(nm,ifm),1,MPI_INTEGER,master_num,MPI_COMM_WORLD,ierr)
          call MPI_Bcast(py_off(nm,ifm),1,MPI_INTEGER,master_num,MPI_COMM_WORLD,ierr)
       end do
    end do
+#endif
    return
 end subroutine ed_nodeget_poly_dims
 !==========================================================================================!
@@ -1852,9 +1888,13 @@ subroutine ed_nodeget_worklist_info
    use mem_polygons , only : maxsite             ! ! intent(in)
    implicit none
    !------ Pre-compiled options. ----------------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !------ Local variables. ---------------------------------------------------------------!
+#if defined(RAMS_MPI)
    integer, dimension(MPI_STATUS_SIZE) :: status
+#endif
    integer                             :: ierr
    integer                             :: npolygons
    integer                             :: mpiid
@@ -1876,6 +1916,7 @@ subroutine ed_nodeget_worklist_info
       call ed_nullify_work_vec(work_v(ifm))
       call ed_alloc_work_vec(work_v(ifm),npolygons,maxsite)
 
+#if defined(RAMS_MPI)
       mpiid=1300000 + maxmach*(ifm-1)*(10+5*maxsite)+mynum
 
       !------ Grab the information. -------------------------------------------------------!
@@ -1913,6 +1954,7 @@ subroutine ed_nodeget_worklist_info
                       ,MPI_COMM_WORLD,status,ierr)
          mpiid = mpiid + 1
       end do
+#endif
    end do
    return
 end subroutine ed_nodeget_worklist_info

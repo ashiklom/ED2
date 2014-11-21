@@ -29,7 +29,9 @@ subroutine ed_1st_master (ipara, nnodestotal,nslaves, headnode_num, name_name)
    implicit none
 
    !----- Pre-compiled variables from MPI. ------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !----- Arguments. ----------------------------------------------------------------------!
    integer         , intent(in) :: ipara        ! 0 if sequential run; 1 if parallel run
    integer         , intent(in) :: nnodestotal  ! total number of nodes on any run
@@ -118,7 +120,9 @@ subroutine ed_1st_master (ipara, nnodestotal,nslaves, headnode_num, name_name)
    ! shouldn't), we must fill ed_node_coms in the head node as well.  For simplicity, the  !
    ! master is the last slave, so mynum(head)=nslaves+1.                                   !
    !---------------------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    if (iparallel == 1) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    call ed_masterput_processid(nslaves,headnode_num,masterworks,iparallel)
    call ed_masterput_nl(iparallel)
@@ -130,15 +134,21 @@ subroutine ed_1st_master (ipara, nnodestotal,nslaves, headnode_num, name_name)
    ! read-in of the land-sea mask and soil textural class.                                 !
    !---------------------------------------------------------------------------------------!
    call ed_node_decomp(1,standalone,masterworks)
+#if defined(RAMS_MPI)
    if (iparallel == 1) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    call ed_masterput_poly_dims(iparallel,masterworks)
 
+#if defined(RAMS_MPI)
    if (iparallel == 1) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    call ed_masterput_worklist_info(iparallel)
 
+#if defined(RAMS_MPI)
    if (iparallel == 1) call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    return
 end subroutine ed_1st_master
@@ -160,7 +170,9 @@ subroutine ed_1st_node(init)
    use ed_mem_alloc, only : ed_memory_allocation ! ! subroutine
    implicit none
    !----- Pre-compiled variables from MPI. ------------------------------------------------!
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !----- Arguments. ----------------------------------------------------------------------!
    integer, intent(in) :: init
    !----- Local variables. ----------------------------------------------------------------!
@@ -169,7 +181,9 @@ subroutine ed_1st_node(init)
 
 
    !----- Make sure the node is synchronised with all fellows. ----------------------------!
+#if defined(RAMS_MPI)
    call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    !----- Get the node information and the namelist. --------------------------------------!
    call ed_nodeget_processid(1)
@@ -177,16 +191,22 @@ subroutine ed_1st_node(init)
 
    !----- Get the meteorological driver header. -------------------------------------------!
    call ed_nodeget_met_header()
+#if defined(RAMS_MPI)
    call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    !----- Get the polygon dimensions and allocate structures. -----------------------------!
    call ed_nodeget_poly_dims()
    call ed_memory_allocation(2)
+#if defined(RAMS_MPI)
    call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    !----- Get the work load structures. ---------------------------------------------------!
    call ed_nodeget_worklist_info()
+#if defined(RAMS_MPI)
    call MPI_Barrier(MPI_COMM_WORLD,ierr)
+#endif
 
    return
 end subroutine ed_1st_node

@@ -321,7 +321,9 @@ subroutine load_ecosystem_state()
    use ed_state_vars     , only : edgrid_g        ! ! structure
 
    implicit none
+#if defined(RAMS_MPI)
    include 'mpif.h'
+#endif
    !----- Local variables -----------------------------------------------------------------!
    integer                :: ierr
    integer                :: igr
@@ -337,9 +339,11 @@ subroutine load_ecosystem_state()
    !---------------------------------------------------------------------------------------!
    ! STEP 1: Read in Site files and initialize hydrologic adjacencies.                     !
    !---------------------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    if (mynum /= 1) &
       call MPI_Recv(ping,1,MPI_INTEGER,recvnum,100,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
-  
+#endif
+
    select case (ied_init_mode)
    case (3)
       !----- Hydrology run.  Use specific scheme. -----------------------------------------!
@@ -351,16 +355,24 @@ subroutine load_ecosystem_state()
    case default
       call set_site_defprops()
    end select
-  
+
+#if defined(RAMS_MPI)
    if (mynum < nnodetot) call MPI_Send(ping,1,MPI_INTEGER,sendnum,100,MPI_COMM_WORLD,ierr)
-  
+#endif
+   !---------------------------------------------------------------------------------------!
+
+
+
+
+
    !---------------------------------------------------------------------------------------!
    ! STEP 3: Do ASCII type restart initialization of site patch and cohort biophysical     !
    !         states.                                                                       !
    !---------------------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    if (mynum /= 1) &
       call MPI_RECV(ping,1,MPI_INTEGER,recvnum,101,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
-  
+#endif
 
    select case (ied_init_mode)
    case (-8,-1,0)
@@ -432,32 +444,49 @@ subroutine load_ecosystem_state()
 
 
 
+#if defined(RAMS_MPI)
    if (mynum < nnodetot) call MPI_Send(ping,1,MPI_INTEGER,sendnum,101,MPI_COMM_WORLD,ierr)
+#endif
+   !---------------------------------------------------------------------------------------!
+
+
+
 
    !---------------------------------------------------------------------------------------!
    ! STEP 4: Initialize phenology parameters and thermal sums.                             !
    !---------------------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    if (mynum /= 1) &
       call MPI_Recv(ping,1,MPI_INTEGER,recvnum,102,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
+#endif
 
    write(unit=*,fmt='(a,i3.3)') ' + Initializing phenology. Node: ',mynum
    call phenology_init()
 
+#if defined(RAMS_MPI)
    if (mynum < nnodetot ) call MPI_Send(ping,1,MPI_INTEGER,sendnum,102,MPI_COMM_WORLD,ierr)
-  
-  
+#endif
+   !---------------------------------------------------------------------------------------!
+
+
+
    !---------------------------------------------------------------------------------------!
    ! STEP 5: Initialize anthropogenic disturbance.                                         !
    !---------------------------------------------------------------------------------------!
+#if defined(RAMS_MPI)
    if (mynum /= 1) &
      call MPI_Recv(ping,1,MPI_INTEGER,recvnum,103,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
+#endif
 
    write(unit=*,fmt='(a,i3.3)')                                                            &
       ' + Initializing anthropogenic disturbance forcing. Node: ',mynum
 
    call landuse_init()
 
+#if defined(RAMS_MPI)
    if (mynum < nnodetot ) call MPI_Send(ping,1,MPI_INTEGER,sendnum,103,MPI_COMM_WORLD,ierr)
+#endif
+   !---------------------------------------------------------------------------------------!
 
    if (mynum == 1) then
       do igr=1,ngrids
