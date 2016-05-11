@@ -45,12 +45,12 @@ BASE=$(ED_ROOT)/build/
 
 USE_HDF5=1
 
-HDF5_HOME=/usr
-HDF5_INCS=-I${HDF5_HOME}/include
-HDF5C_INCS=-I${HDF5_HOME}/include
-HDF5_LIBS=${HDF5_HOME}/lib/libhdf5_fortran.a \
-        ${HDF5_HOME}/lib/libhdf5.a \
-        ${HDF5_HOME}/lib/libhdf5_hl.a -lz
+HDF5_INCS=-I/usr/include/mpich -I/usr/include/hdf5/mpich
+HDF5C_INCS=${HDF5_INCS}
+HDF5_HOME= /usr/lib/x86_64-linux-gnu/hdf5/openmpi
+HDF5_LIBS=${HDF5_HOME}/libhdf5_fortran.a \
+        ${HDF5_HOME}/libhdf5.a \
+        ${HDF5_HOME}/libhdf5_hl.a -lz -ldl
 
 USE_COLLECTIVE_MPIO=0
  
@@ -86,11 +86,11 @@ USE_MPIWTIME=1
 
 #----------------- gfortran on Linux (optimized build)-----------
 CMACH=PC_GFORTRAN
-F_COMP=mpif90
-F_OPTS=-g -ffree-line-length-none -fno-whole-file -O2 -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check  #-O2
+F_COMP=gfortran
+F_OPTS=-g -ffree-line-length-none -O2 -fopenmp  # -ffpe-trap=invalid,zero,overflow -fbounds-check  #-O2
 C_COMP=mpicc 
 C_OPTS=-g -O2 -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check #-O2
-LOADER=mpif90
+LOADER=gfortran-4.7
 LOADER_OPTS=${F_OPTS}
 C_LOADER=mpicc
 LIBS=

@@ -1,239 +1,5 @@
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine is the main driver for the Heun's (RK2) integration scheme.          !
-!------------------------------------------------------------------------------------------!
-subroutine heun_timestep(cgrid)
-   use rk4_coms              , only : integration_vars   & ! structure
-                                    , rk4patchtype       & ! structure
-                                    , zero_rk4_patch     & ! subroutine
-                                    , zero_rk4_cohort    & ! subroutine
-                                    , integration_buff   & ! intent(out)
-                                    , rk4site            ! ! intent(out)
-   use ed_state_vars         , only : edtype             & ! structure
-                                    , polygontype        & ! structure
-                                    , sitetype           & ! structure
-                                    , patchtype          ! ! structure
-   use met_driver_coms       , only : met_driv_state     ! ! structure
-   use grid_coms             , only : nzg                & ! intent(in)
-                                    , nzs                ! ! intent(in)
-   use ed_misc_coms          , only : current_time       & ! intent(in)
-                                    , dtlsm              ! ! intent(in)
-   use ed_max_dims           , only : n_dbh              ! ! intent(in)
-   use soil_coms             , only : soil_rough         & ! intent(in)
-                                    , snow_rough         ! ! intent(in)
-   use therm_lib             , only : tq2enthalpy        ! ! function
-   use budget_utils          , only : update_budget      & ! function
-                                    , compute_budget     ! ! function
-   ! OMP use omp_lib
-
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(edtype)             , target      :: cgrid
-   !----- Local variables -----------------------------------------------------------------!
-   type(polygontype)        , pointer     :: cpoly
-   type(sitetype)           , pointer     :: csite
-   type(patchtype)          , pointer     :: cpatch
-   type(met_driv_state)     , pointer     :: cmet
-   integer                                :: ipy
-   integer                                :: isi
-   integer                                :: ipa
-   integer                                :: imon
-   integer                                :: nsteps
-   real                                   :: wcurr_loss2atm
-   real                                   :: ecurr_netrad
-   real                                   :: ecurr_loss2atm
-   real                                   :: co2curr_loss2atm
-   real                                   :: wcurr_loss2drainage
-   real                                   :: ecurr_loss2drainage
-   real                                   :: wcurr_loss2runoff
-   real                                   :: ecurr_loss2runoff
-   real                                   :: old_can_enthalpy
-   real                                   :: old_can_shv
-   real                                   :: old_can_co2
-   real                                   :: old_can_rhos
-   real                                   :: old_can_temp
-   real                                   :: old_can_prss
-   real                                   :: patch_vels
-   integer                                :: ibuff
-   !----- Local constants. ----------------------------------------------------------------!
-   logical                   , parameter  :: test_energy_sanity = .false.
-   !---------------------------------------------------------------------------------------!
-
-   ibuff = 1
-
-   polyloop: do ipy = 1,cgrid%npolygons
-      cpoly => cgrid%polygon(ipy)
-
-      siteloop: do isi = 1,cpoly%nsites
-         csite => cpoly%site(isi)
-         cmet  => cpoly%met(isi)
-
-         !---------------------------------------------------------------------------------!
-         !     Update the monthly rainfall.                                                !
-         !---------------------------------------------------------------------------------!
-         imon                             = current_time%month
-         cpoly%avg_monthly_pcpg(imon,isi) = cpoly%avg_monthly_pcpg(imon,isi)               &
-                                          + cmet%pcpg * dtlsm
-         !---------------------------------------------------------------------------------!
-
-         !---------------------------------------------------------------------------------!
-         !    Copy the meteorological variables to the rk4site structure.                  !
-         !---------------------------------------------------------------------------------!
-
-         call copy_met_2_rk4site(nzg,cmet%atm_ustar,cmet%atm_theiv,cmet%atm_vpdef          &
-                                ,cmet%atm_theta,cmet%atm_tmp,cmet%atm_shv,cmet%atm_co2     &
-                                ,cmet%geoht,cmet%exner,cmet%pcpg,cmet%qpcpg,cmet%dpcpg     &
-                                ,cmet%prss,cmet%rshort,cmet%rlong,cmet%par_beam            &
-                                ,cmet%par_diffuse,cmet%nir_beam,cmet%nir_diffuse           &
-                                ,cmet%geoht,cpoly%lsl(isi),cpoly%ntext_soil(:,isi)         &
-                                ,cpoly%green_leaf_factor(:,isi),cgrid%lon(ipy)             &
-                                ,cgrid%lat(ipy),cgrid%cosz(ipy))
-         !---------------------------------------------------------------------------------!
-
-
-         patchloop: do ipa = 1,csite%npatches
-            cpatch => csite%patch(ipa)
-
-
-            !----- Reset all buffers to zero, as a safety measure. ------------------------!
-            call zero_rk4_patch(integration_buff(ibuff)%initp)
-            call zero_rk4_patch(integration_buff(ibuff)%ytemp)
-            call zero_rk4_patch(integration_buff(ibuff)%yerr)
-            call zero_rk4_patch(integration_buff(ibuff)%yscal)
-            call zero_rk4_patch(integration_buff(ibuff)%dydx)
-            call zero_rk4_cohort(integration_buff(ibuff)%initp)
-            call zero_rk4_cohort(integration_buff(ibuff)%ytemp)
-            call zero_rk4_cohort(integration_buff(ibuff)%yerr)
-            call zero_rk4_cohort(integration_buff(ibuff)%yscal)
-            call zero_rk4_cohort(integration_buff(ibuff)%dydx)
-
-            !----- Get velocity for aerodynamic resistance. -------------------------------!
-            if (csite%can_theta(ipa) < cmet%atm_theta) then
-!               cmet%vels = cmet%vels_stab
-               patch_vels = cmet%vels_stab
-            else
-!               cmet%vels = cmet%vels_unstab
-               patch_vels = cmet%vels_stab
-            end if
-            !------------------------------------------------------------------------------!
-
-
-
-            !------------------------------------------------------------------------------!
-            !    Update roughness and canopy depth.                                        !
-            !------------------------------------------------------------------------------!
-            call update_patch_thermo_props(csite,ipa,ipa,nzg,nzs,cpoly%ntext_soil(:,isi))
-            call update_patch_derived_props(csite,ipa)
-            !------------------------------------------------------------------------------!
-
-
-
-            !----- Save the previous thermodynamic state. ---------------------------------!
-            old_can_shv      = csite%can_shv  (ipa)
-            old_can_co2      = csite%can_co2  (ipa)
-            old_can_rhos     = csite%can_rhos (ipa)
-            old_can_temp     = csite%can_temp (ipa)
-            old_can_prss     = csite%can_prss (ipa)
-            old_can_enthalpy = tq2enthalpy(csite%can_temp(ipa),csite%can_shv(ipa),.true.)
-            !------------------------------------------------------------------------------!
-
-            !----- Compute current storage terms. -----------------------------------------!
-            call update_budget(csite,cpoly%lsl(isi),ipa,ipa)
-            !------------------------------------------------------------------------------!
-            !------------------------------------------------------------------------------!
-            !      Test whether temperature and energy are reasonable.                     !
-            !------------------------------------------------------------------------------!
-            if (test_energy_sanity) then
-               call sanity_check_veg_energy(csite,ipa)
-            end if
-            !------------------------------------------------------------------------------!
-
-
-
-            !------------------------------------------------------------------------------!
-            !     Set up the integration patch.                                            !
-            !------------------------------------------------------------------------------!
-            call copy_patch_init(csite,ipa,integration_buff(ibuff)%initp,patch_vels)
-            !------------------------------------------------------------------------------!
-
-            !----- Get photosynthesis, stomatal conductance, and transpiration. -----------!
-            call canopy_photosynthesis(csite,cmet,nzg,ipa,cpoly%lsl(isi)                   &
-                                      ,cpoly%ntext_soil(:,isi)                             &
-                                      ,cpoly%leaf_aging_factor(:,isi)                      &
-                                      ,cpoly%green_leaf_factor(:,isi))
-            !------------------------------------------------------------------------------!
-
-
-
-            !----- Compute root and heterotrophic respiration. ----------------------------!
-            call soil_respiration(csite,ipa,nzg,cpoly%ntext_soil(:,isi))
-            !------------------------------------------------------------------------------!
-
-
-
-            !------------------------------------------------------------------------------!
-            !     Set up the remaining, carbon-dependent variables to the buffer.          !
-            !------------------------------------------------------------------------------!
-            call copy_patch_init_carbon(csite,ipa,integration_buff(ibuff)%initp)
-            !------------------------------------------------------------------------------!
-
-
-            !------------------------------------------------------------------------------!
-            !     This is the step in which the derivatives are computed, we use a         !
-            ! structure that is very similar to the Runge-Kutta, though a simpler one.     !
-            !------------------------------------------------------------------------------!
-            call integrate_patch_heun(csite,ipa,isi,cpoly%nighttime(isi),wcurr_loss2atm    &
-                                     ,ecurr_netrad,ecurr_loss2atm,co2curr_loss2atm         &
-                                     ,wcurr_loss2drainage,ecurr_loss2drainage              &
-                                     ,wcurr_loss2runoff,ecurr_loss2runoff,nsteps)
-            !------------------------------------------------------------------------------!
-
-
-
-            !----- Add the number of steps into the step counter. -------------------------!
-            cgrid%workload(13,ipy) = cgrid%workload(13,ipy) + real(nsteps)
-            !------------------------------------------------------------------------------!
-
-
-
-            !------------------------------------------------------------------------------!
-            !    Update the minimum monthly temperature, based on canopy temperature.      !
-            !------------------------------------------------------------------------------!
-            if (cpoly%site(isi)%can_temp(ipa) < cpoly%min_monthly_temp(isi)) then
-               cpoly%min_monthly_temp(isi) = cpoly%site(isi)%can_temp(ipa)
-            end if
-            !------------------------------------------------------------------------------!
-
-
-
-
-            !------------------------------------------------------------------------------!
-            !     Compute the residuals.                                                   !
-            !------------------------------------------------------------------------------!
-            call compute_budget(csite,cpoly%lsl(isi),cmet%pcpg,cmet%qpcpg,ipa              &
-                               ,wcurr_loss2atm,ecurr_netrad,ecurr_loss2atm                 &
-                               ,co2curr_loss2atm,wcurr_loss2drainage,ecurr_loss2drainage   &
-                               ,wcurr_loss2runoff,ecurr_loss2runoff,cpoly%area(isi)        &
-                               ,cgrid%cbudget_nep(ipy),old_can_enthalpy,old_can_shv        &
-                               ,old_can_co2,old_can_rhos,old_can_temp,old_can_prss)
-            !------------------------------------------------------------------------------!
-         end do patchloop
-         !---------------------------------------------------------------------------------!
-      end do siteloop
-      !------------------------------------------------------------------------------------!
-   end do polyloop
-   !---------------------------------------------------------------------------------------!
-
-   return
-end subroutine heun_timestep
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
+module mod_heun_timestep
+contains
 !==========================================================================================!
 !==========================================================================================!
 !     This subroutine will drive the integration process using the Heun method.  Notice    !
@@ -858,3 +624,242 @@ subroutine heun_stepper(x,h,csite,ipa,reject_step,reject_result)
 end subroutine heun_stepper
 !==========================================================================================!
 !==========================================================================================!
+end module mod_heun_timestep
+
+!==========================================================================================!
+!==========================================================================================!
+!     This subroutine is the main driver for the Heun's (RK2) integration scheme.          !
+!------------------------------------------------------------------------------------------!
+subroutine heun_timestep(cgrid)
+   use mod_heun_timestep
+   use rk4_coms              , only : integration_vars   & ! structure
+                                    , rk4patchtype       & ! structure
+                                    , zero_rk4_patch     & ! subroutine
+                                    , zero_rk4_cohort    & ! subroutine
+                                    , integration_buff   & ! intent(out)
+                                    , rk4site            ! ! intent(out)
+   use ed_state_vars         , only : edtype             & ! structure
+                                    , polygontype        & ! structure
+                                    , sitetype           & ! structure
+                                    , patchtype          ! ! structure
+   use met_driver_coms       , only : met_driv_state     ! ! structure
+   use grid_coms             , only : nzg                & ! intent(in)
+                                    , nzs                ! ! intent(in)
+   use ed_misc_coms          , only : current_time       & ! intent(in)
+                                    , dtlsm              ! ! intent(in)
+   use ed_max_dims           , only : n_dbh              ! ! intent(in)
+   use soil_coms             , only : soil_rough         & ! intent(in)
+                                    , snow_rough         ! ! intent(in)
+   use therm_lib             , only : tq2enthalpy        ! ! function
+   use budget_utils          , only : update_budget      & ! function
+                                    , compute_budget     ! ! function
+   ! OMP use omp_lib
+
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(edtype)             , target      :: cgrid
+   !----- Local variables -----------------------------------------------------------------!
+   type(polygontype)        , pointer     :: cpoly
+   type(sitetype)           , pointer     :: csite
+   type(patchtype)          , pointer     :: cpatch
+   type(met_driv_state)     , pointer     :: cmet
+   integer                                :: ipy
+   integer                                :: isi
+   integer                                :: ipa
+   integer                                :: imon
+   integer                                :: nsteps
+   real                                   :: wcurr_loss2atm
+   real                                   :: ecurr_netrad
+   real                                   :: ecurr_loss2atm
+   real                                   :: co2curr_loss2atm
+   real                                   :: wcurr_loss2drainage
+   real                                   :: ecurr_loss2drainage
+   real                                   :: wcurr_loss2runoff
+   real                                   :: ecurr_loss2runoff
+   real                                   :: old_can_enthalpy
+   real                                   :: old_can_shv
+   real                                   :: old_can_co2
+   real                                   :: old_can_rhos
+   real                                   :: old_can_temp
+   real                                   :: old_can_prss
+   real                                   :: patch_vels
+   integer                                :: ibuff
+   !----- Local constants. ----------------------------------------------------------------!
+   logical                   , parameter  :: test_energy_sanity = .false.
+   !---------------------------------------------------------------------------------------!
+
+   ibuff = 1
+
+   polyloop: do ipy = 1,cgrid%npolygons
+      cpoly => cgrid%polygon(ipy)
+
+      siteloop: do isi = 1,cpoly%nsites
+         csite => cpoly%site(isi)
+         cmet  => cpoly%met(isi)
+
+         !---------------------------------------------------------------------------------!
+         !     Update the monthly rainfall.                                                !
+         !---------------------------------------------------------------------------------!
+         imon                             = current_time%month
+         cpoly%avg_monthly_pcpg(imon,isi) = cpoly%avg_monthly_pcpg(imon,isi)               &
+                                          + cmet%pcpg * dtlsm
+         !---------------------------------------------------------------------------------!
+
+         !---------------------------------------------------------------------------------!
+         !    Copy the meteorological variables to the rk4site structure.                  !
+         !---------------------------------------------------------------------------------!
+
+         call copy_met_2_rk4site(nzg,cmet%atm_ustar,cmet%atm_theiv,cmet%atm_vpdef          &
+                                ,cmet%atm_theta,cmet%atm_tmp,cmet%atm_shv,cmet%atm_co2     &
+                                ,cmet%geoht,cmet%exner,cmet%pcpg,cmet%qpcpg,cmet%dpcpg     &
+                                ,cmet%prss,cmet%rshort,cmet%rlong,cmet%par_beam            &
+                                ,cmet%par_diffuse,cmet%nir_beam,cmet%nir_diffuse           &
+                                ,cmet%geoht,cpoly%lsl(isi),cpoly%ntext_soil(:,isi)         &
+                                ,cpoly%green_leaf_factor(:,isi),cgrid%lon(ipy)             &
+                                ,cgrid%lat(ipy),cgrid%cosz(ipy))
+         !---------------------------------------------------------------------------------!
+
+
+         patchloop: do ipa = 1,csite%npatches
+            cpatch => csite%patch(ipa)
+
+
+            !----- Reset all buffers to zero, as a safety measure. ------------------------!
+            call zero_rk4_patch(integration_buff(ibuff)%initp)
+            call zero_rk4_patch(integration_buff(ibuff)%ytemp)
+            call zero_rk4_patch(integration_buff(ibuff)%yerr)
+            call zero_rk4_patch(integration_buff(ibuff)%yscal)
+            call zero_rk4_patch(integration_buff(ibuff)%dydx)
+            call zero_rk4_cohort(integration_buff(ibuff)%initp)
+            call zero_rk4_cohort(integration_buff(ibuff)%ytemp)
+            call zero_rk4_cohort(integration_buff(ibuff)%yerr)
+            call zero_rk4_cohort(integration_buff(ibuff)%yscal)
+            call zero_rk4_cohort(integration_buff(ibuff)%dydx)
+
+            !----- Get velocity for aerodynamic resistance. -------------------------------!
+            if (csite%can_theta(ipa) < cmet%atm_theta) then
+!               cmet%vels = cmet%vels_stab
+               patch_vels = cmet%vels_stab
+            else
+!               cmet%vels = cmet%vels_unstab
+               patch_vels = cmet%vels_stab
+            end if
+            !------------------------------------------------------------------------------!
+
+
+
+            !------------------------------------------------------------------------------!
+            !    Update roughness and canopy depth.                                        !
+            !------------------------------------------------------------------------------!
+            call update_patch_thermo_props(csite,ipa,ipa,nzg,nzs,cpoly%ntext_soil(:,isi))
+            call update_patch_derived_props(csite,ipa)
+            !------------------------------------------------------------------------------!
+
+
+
+            !----- Save the previous thermodynamic state. ---------------------------------!
+            old_can_shv      = csite%can_shv  (ipa)
+            old_can_co2      = csite%can_co2  (ipa)
+            old_can_rhos     = csite%can_rhos (ipa)
+            old_can_temp     = csite%can_temp (ipa)
+            old_can_prss     = csite%can_prss (ipa)
+            old_can_enthalpy = tq2enthalpy(csite%can_temp(ipa),csite%can_shv(ipa),.true.)
+            !------------------------------------------------------------------------------!
+
+            !----- Compute current storage terms. -----------------------------------------!
+            call update_budget(csite,cpoly%lsl(isi),ipa,ipa)
+            !------------------------------------------------------------------------------!
+            !------------------------------------------------------------------------------!
+            !      Test whether temperature and energy are reasonable.                     !
+            !------------------------------------------------------------------------------!
+            if (test_energy_sanity) then
+               call sanity_check_veg_energy(csite,ipa)
+            end if
+            !------------------------------------------------------------------------------!
+
+
+
+            !------------------------------------------------------------------------------!
+            !     Set up the integration patch.                                            !
+            !------------------------------------------------------------------------------!
+            call copy_patch_init(csite,ipa,integration_buff(ibuff)%initp,patch_vels)
+            !------------------------------------------------------------------------------!
+
+            !----- Get photosynthesis, stomatal conductance, and transpiration. -----------!
+            call canopy_photosynthesis(csite,cmet,nzg,ipa,cpoly%lsl(isi)                   &
+                                      ,cpoly%ntext_soil(:,isi)                             &
+                                      ,cpoly%leaf_aging_factor(:,isi)                      &
+                                      ,cpoly%green_leaf_factor(:,isi))
+            !------------------------------------------------------------------------------!
+
+
+
+            !----- Compute root and heterotrophic respiration. ----------------------------!
+            call soil_respiration(csite,ipa,nzg,cpoly%ntext_soil(:,isi))
+            !------------------------------------------------------------------------------!
+
+
+
+            !------------------------------------------------------------------------------!
+            !     Set up the remaining, carbon-dependent variables to the buffer.          !
+            !------------------------------------------------------------------------------!
+            call copy_patch_init_carbon(csite,ipa,integration_buff(ibuff)%initp)
+            !------------------------------------------------------------------------------!
+
+
+            !------------------------------------------------------------------------------!
+            !     This is the step in which the derivatives are computed, we use a         !
+            ! structure that is very similar to the Runge-Kutta, though a simpler one.     !
+            !------------------------------------------------------------------------------!
+            call integrate_patch_heun(csite,ipa,isi,cpoly%nighttime(isi),wcurr_loss2atm    &
+                                     ,ecurr_netrad,ecurr_loss2atm,co2curr_loss2atm         &
+                                     ,wcurr_loss2drainage,ecurr_loss2drainage              &
+                                     ,wcurr_loss2runoff,ecurr_loss2runoff,nsteps)
+            !------------------------------------------------------------------------------!
+
+
+
+            !----- Add the number of steps into the step counter. -------------------------!
+            cgrid%workload(13,ipy) = cgrid%workload(13,ipy) + real(nsteps)
+            !------------------------------------------------------------------------------!
+
+
+
+            !------------------------------------------------------------------------------!
+            !    Update the minimum monthly temperature, based on canopy temperature.      !
+            !------------------------------------------------------------------------------!
+            if (cpoly%site(isi)%can_temp(ipa) < cpoly%min_monthly_temp(isi)) then
+               cpoly%min_monthly_temp(isi) = cpoly%site(isi)%can_temp(ipa)
+            end if
+            !------------------------------------------------------------------------------!
+
+
+
+
+            !------------------------------------------------------------------------------!
+            !     Compute the residuals.                                                   !
+            !------------------------------------------------------------------------------!
+            call compute_budget(csite,cpoly%lsl(isi),cmet%pcpg,cmet%qpcpg,ipa              &
+                               ,wcurr_loss2atm,ecurr_netrad,ecurr_loss2atm                 &
+                               ,co2curr_loss2atm,wcurr_loss2drainage,ecurr_loss2drainage   &
+                               ,wcurr_loss2runoff,ecurr_loss2runoff,cpoly%area(isi)        &
+                               ,cgrid%cbudget_nep(ipy),old_can_enthalpy,old_can_shv        &
+                               ,old_can_co2,old_can_rhos,old_can_temp,old_can_prss)
+            !------------------------------------------------------------------------------!
+         end do patchloop
+         !---------------------------------------------------------------------------------!
+      end do siteloop
+      !------------------------------------------------------------------------------------!
+   end do polyloop
+   !---------------------------------------------------------------------------------------!
+
+   return
+end subroutine heun_timestep
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+

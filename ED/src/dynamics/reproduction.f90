@@ -1,3 +1,221 @@
+module mod_reproduction
+contains
+!==========================================================================================!
+!==========================================================================================!
+!     This sub-routine will update the repro structure.  The way the dispersal is going to !
+! happen depends on whether the user allows dispersal between sites or within sites only.  !
+! Broadleaf deciduous PFTs do their dispersal only in late spring.  This is because of     !
+! their unique storage respiration.  Other PFTs disperse seeds at any time of the year.    !
+!------------------------------------------------------------------------------------------!
+subroutine seed_dispersal(cpoly,late_spring)
+   use phenology_coms     , only : repro_scheme          ! ! intent(in)
+   use ed_state_vars      , only : polygontype           & ! structure
+                                 , sitetype              & ! structure
+                                 , patchtype             ! ! structure
+   use pft_coms           , only : recruittype           & ! structure
+                                 , nonlocal_dispersal    & ! intent(in)
+                                 , seedling_mortality    & ! intent(in)
+                                 , phenology             ! ! intent(in)
+   use ed_misc_coms       , only : ibigleaf              ! ! intent(in)
+
+   implicit none
+   !----- Arguments. ----------------------------------------------------------------------!
+   type(polygontype), target     :: cpoly       ! Current polygon               [      ---]
+   logical          , intent(in) :: late_spring ! Is it late spring             [      T|F]
+   !----- Local variables. ----------------------------------------------------------------!
+   type(sitetype)   , pointer    :: csite       ! Current site                  [      ---]
+   type(sitetype)   , pointer    :: donsite     ! Donor site                    [      ---]
+   type(sitetype)   , pointer    :: recsite     ! Receptor site                 [      ---]
+   type(patchtype)  , pointer    :: donpatch    ! Donor patch                   [      ---]
+   integer                       :: isi         ! Site counter                  [      ---]
+   integer                       :: recsi       ! Receptor site counter         [      ---]
+   integer                       :: donsi       ! Donor site counter            [      ---]
+   integer                       :: recpa       ! Receptor patch counter        [      ---]
+   integer                       :: donpa       ! Donor patch counter           [      ---]
+   integer                       :: donco       ! Donor cohort counter          [      ---]
+   integer                       :: donpft      ! Donor PFT                     [      ---]
+   real                          :: bseedling   ! Surviving seedling biomass    [   kgC/m2]
+   real                          :: bseed_stays ! Seedling biomass that stays   [   kgC/m2]
+   real                          :: bseed_maygo ! Seedling biomass that may go  [   kgC/m2]
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !---------------------------------------------------------------------------------------!
+   !     Here we decide how to disperse seeds based on the reproduction scheme.            !
+   !---------------------------------------------------------------------------------------!
+   select case (repro_scheme)
+   case (0)
+       !------ No reproduction, quit. -----------------------------------------------------!
+       return
+   case (1)
+      !------------------------------------------------------------------------------------!
+      !     Seeds are dispersed amongst patches that belong to the same site, but they     !
+      ! cannot go outside their native site.                                               !
+      !------------------------------------------------------------------------------------!
+      siteloop1: do isi = 1,cpoly%nsites
+         csite => cpoly%site(isi)
+
+         !---------------------------------------------------------------------------------!
+         !      Loop over the donor cohorts.                                               !
+         !---------------------------------------------------------------------------------!
+         donpaloop1: do donpa = 1,csite%npatches
+            donpatch => csite%patch(donpa)
+
+            doncoloop1: do donco = 1, donpatch%ncohorts
+
+               !----- Define an alias for PFT. --------------------------------------------!
+               donpft = donpatch%pft(donco)
+
+               !---------------------------------------------------------------------------!
+               !    Find the biomass of survivor seedlings.  Units: kgC/m2                 !
+               !---------------------------------------------------------------------------!
+               if (phenology(donpft) /= 2 .or. late_spring) then
+                  bseedling   = donpatch%nplant(donco) * donpatch%bseeds(donco)            &
+                              * (1.0 - seedling_mortality(donpft))
+                  select case (ibigleaf)
+                  case (0)
+                     bseed_stays = bseedling * (1.0 - nonlocal_dispersal(donpft))
+                     bseed_maygo = bseedling * nonlocal_dispersal(donpft)
+                  case (1)
+                     !---- if bigleaf cannot disperse seedlings to other patches ----------!
+                     bseed_stays = bseedling
+                     bseed_maygo = 0.
+                  end select
+
+               else
+                  !----- Not a good time for reproduction.  No seedlings. -----------------!
+                  bseedling     = 0.
+                  bseed_stays   = 0.
+                  bseed_maygo   = 0.
+               end if
+               !---------------------------------------------------------------------------!
+
+               !---------------------------------------------------------------------------!
+               !   Spread the seedlings across all patches in this site.                   !
+               !---------------------------------------------------------------------------!
+               recpaloop1: do recpa = 1,csite%npatches
+
+                  !------------------------------------------------------------------------!
+                  !     Add the non-local dispersal evenly across all patches, including   !
+                  ! the donor patch.  We must scale the biomass by the combined area of    !
+                  ! this patch and site so the total carbon is preserved.                  !
+                  !------------------------------------------------------------------------!
+                  csite%repro(donpft,recpa) = csite%repro(donpft,recpa)                    &
+                                            + bseed_maygo * csite%area(donpa)
+                  !------------------------------------------------------------------------!
+
+
+
+
+                  !------------------------------------------------------------------------!
+                  !      Include the local dispersal if this is the donor patch.           !
+                  !------------------------------------------------------------------------!
+                  if (recpa == donpa) then
+                     csite%repro(donpft,recpa) = csite%repro(donpft,recpa) + bseed_stays
+                  end if
+                  !------------------------------------------------------------------------!
+
+               end do recpaloop1
+               !---------------------------------------------------------------------------!
+            end do doncoloop1
+            !------------------------------------------------------------------------------!
+         end do donpaloop1
+         !---------------------------------------------------------------------------------!
+      end do siteloop1 
+      !------------------------------------------------------------------------------------!
+
+   case (2,3)
+
+      !------------------------------------------------------------------------------------!
+      !     Seeds are dispersed amongst patches that belong to the same polygon.  They are !
+      ! allowed to go from one site to the other, but they cannot go outside their native  !
+      ! polygon.                                                                           !
+      !------------------------------------------------------------------------------------!
+
+      !------------------------------------------------------------------------------------!
+      !      Loop over the donor cohorts.                                                  !
+      !------------------------------------------------------------------------------------!
+      donsiloop2: do donsi = 1,cpoly%nsites
+         donsite => cpoly%site(donsi)
+
+         donpaloop2: do donpa = 1,donsite%npatches
+            donpatch => donsite%patch(donpa)
+
+            doncoloop2: do donco = 1, donpatch%ncohorts
+
+               !----- Define an alias for PFT. --------------------------------------------!
+               donpft = donpatch%pft(donco)
+
+               !---------------------------------------------------------------------------!
+               !    Find the biomass of survivor seedlings.  Units: kgC/m2                 !
+               !---------------------------------------------------------------------------!
+               if (phenology(donpft) /= 2 .or. late_spring) then
+                  bseedling   = donpatch%nplant(donco) * donpatch%bseeds(donco)            &
+                              * (1.0 - seedling_mortality(donpft))
+
+                  select case (ibigleaf)
+                  case (0)
+                     bseed_stays = bseedling * (1.0 - nonlocal_dispersal(donpft))
+                     bseed_maygo = bseedling * nonlocal_dispersal(donpft)
+                  case (1)
+                     !---- if bigleaf cannot disperse seedlings to other patches ----------!
+                     bseed_stays = bseedling
+                     bseed_maygo = 0.
+                  end select
+               else
+                  !----- Not a good time for reproduction.  No seedlings. -----------------!
+                  bseedling   = 0.
+                  bseed_stays = 0.
+                  bseed_maygo = 0.
+               end if
+               !---------------------------------------------------------------------------!
+               
+               !---------------------------------------------------------------------------!
+               !   Spread the seedlings across all patches in this polygon.                !
+               !---------------------------------------------------------------------------!
+               recsiloop2: do recsi = 1,cpoly%nsites
+                  recsite => cpoly%site(recsi)
+                  recpaloop2: do recpa = 1,recsite%npatches
+
+                     !---------------------------------------------------------------------!
+                     !     Add the non-local dispersal evenly across all patches,          !
+                     ! including the donor patch.  We must scale the biomass by the        !
+                     ! combined area of this patch and site so the total carbon is         !
+                     ! preserved.                                                          !
+                     !---------------------------------------------------------------------!
+                     recsite%repro(donpft,recpa) = recsite%repro(donpft,recpa)             &
+                                                 + bseed_maygo * recsite%area(donpa)       &
+                                                 * cpoly%area(donsi)
+                     !---------------------------------------------------------------------!
+
+                     !---------------------------------------------------------------------!
+                     !      Include the local dispersal if this is the donor patch.        !
+                     !---------------------------------------------------------------------!
+                     if (recpa == donpa .and. recsi == donsi) then
+                        recsite%repro(donpft,recpa) = recsite%repro(donpft,recpa)          &
+                                                    + bseed_stays
+                     end if
+                     !---------------------------------------------------------------------!
+                     
+                  end do recpaloop2
+                  !------------------------------------------------------------------------!
+               end do recsiloop2
+               !---------------------------------------------------------------------------!
+            end do doncoloop2
+            !------------------------------------------------------------------------------!
+         end do donpaloop2
+         !---------------------------------------------------------------------------------!
+      end do donsiloop2
+      !------------------------------------------------------------------------------------!
+
+
+   end select
+   return
+end subroutine seed_dispersal
+!==========================================================================================!
+!==========================================================================================!
+end module
 !==========================================================================================!
 !==========================================================================================!
 !      This subroutine will drive the reproduction, based on its carbon availability and   !
@@ -5,6 +223,7 @@
 ! want it, in which case the seedling biomass will go to the litter pools.                 !
 !------------------------------------------------------------------------------------------!
 subroutine reproduction(cgrid, month)
+   use mod_reproduction
    use ed_state_vars      , only : edtype                   & ! structure
                                  , polygontype              & ! structure
                                  , sitetype                 & ! structure
@@ -847,218 +1066,3 @@ end subroutine reproduction_eq_0
 
 
 
-!==========================================================================================!
-!==========================================================================================!
-!     This sub-routine will update the repro structure.  The way the dispersal is going to !
-! happen depends on whether the user allows dispersal between sites or within sites only.  !
-! Broadleaf deciduous PFTs do their dispersal only in late spring.  This is because of     !
-! their unique storage respiration.  Other PFTs disperse seeds at any time of the year.    !
-!------------------------------------------------------------------------------------------!
-subroutine seed_dispersal(cpoly,late_spring)
-   use phenology_coms     , only : repro_scheme          ! ! intent(in)
-   use ed_state_vars      , only : polygontype           & ! structure
-                                 , sitetype              & ! structure
-                                 , patchtype             ! ! structure
-   use pft_coms           , only : recruittype           & ! structure
-                                 , nonlocal_dispersal    & ! intent(in)
-                                 , seedling_mortality    & ! intent(in)
-                                 , phenology             ! ! intent(in)
-   use ed_misc_coms       , only : ibigleaf              ! ! intent(in)
-
-   implicit none
-   !----- Arguments. ----------------------------------------------------------------------!
-   type(polygontype), target     :: cpoly       ! Current polygon               [      ---]
-   logical          , intent(in) :: late_spring ! Is it late spring             [      T|F]
-   !----- Local variables. ----------------------------------------------------------------!
-   type(sitetype)   , pointer    :: csite       ! Current site                  [      ---]
-   type(sitetype)   , pointer    :: donsite     ! Donor site                    [      ---]
-   type(sitetype)   , pointer    :: recsite     ! Receptor site                 [      ---]
-   type(patchtype)  , pointer    :: donpatch    ! Donor patch                   [      ---]
-   integer                       :: isi         ! Site counter                  [      ---]
-   integer                       :: recsi       ! Receptor site counter         [      ---]
-   integer                       :: donsi       ! Donor site counter            [      ---]
-   integer                       :: recpa       ! Receptor patch counter        [      ---]
-   integer                       :: donpa       ! Donor patch counter           [      ---]
-   integer                       :: donco       ! Donor cohort counter          [      ---]
-   integer                       :: donpft      ! Donor PFT                     [      ---]
-   real                          :: bseedling   ! Surviving seedling biomass    [   kgC/m2]
-   real                          :: bseed_stays ! Seedling biomass that stays   [   kgC/m2]
-   real                          :: bseed_maygo ! Seedling biomass that may go  [   kgC/m2]
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !---------------------------------------------------------------------------------------!
-   !     Here we decide how to disperse seeds based on the reproduction scheme.            !
-   !---------------------------------------------------------------------------------------!
-   select case (repro_scheme)
-   case (0)
-       !------ No reproduction, quit. -----------------------------------------------------!
-       return
-   case (1)
-      !------------------------------------------------------------------------------------!
-      !     Seeds are dispersed amongst patches that belong to the same site, but they     !
-      ! cannot go outside their native site.                                               !
-      !------------------------------------------------------------------------------------!
-      siteloop1: do isi = 1,cpoly%nsites
-         csite => cpoly%site(isi)
-
-         !---------------------------------------------------------------------------------!
-         !      Loop over the donor cohorts.                                               !
-         !---------------------------------------------------------------------------------!
-         donpaloop1: do donpa = 1,csite%npatches
-            donpatch => csite%patch(donpa)
-
-            doncoloop1: do donco = 1, donpatch%ncohorts
-
-               !----- Define an alias for PFT. --------------------------------------------!
-               donpft = donpatch%pft(donco)
-
-               !---------------------------------------------------------------------------!
-               !    Find the biomass of survivor seedlings.  Units: kgC/m2                 !
-               !---------------------------------------------------------------------------!
-               if (phenology(donpft) /= 2 .or. late_spring) then
-                  bseedling   = donpatch%nplant(donco) * donpatch%bseeds(donco)            &
-                              * (1.0 - seedling_mortality(donpft))
-                  select case (ibigleaf)
-                  case (0)
-                     bseed_stays = bseedling * (1.0 - nonlocal_dispersal(donpft))
-                     bseed_maygo = bseedling * nonlocal_dispersal(donpft)
-                  case (1)
-                     !---- if bigleaf cannot disperse seedlings to other patches ----------!
-                     bseed_stays = bseedling
-                     bseed_maygo = 0.
-                  end select
-
-               else
-                  !----- Not a good time for reproduction.  No seedlings. -----------------!
-                  bseedling     = 0.
-                  bseed_stays   = 0.
-                  bseed_maygo   = 0.
-               end if
-               !---------------------------------------------------------------------------!
-
-               !---------------------------------------------------------------------------!
-               !   Spread the seedlings across all patches in this site.                   !
-               !---------------------------------------------------------------------------!
-               recpaloop1: do recpa = 1,csite%npatches
-
-                  !------------------------------------------------------------------------!
-                  !     Add the non-local dispersal evenly across all patches, including   !
-                  ! the donor patch.  We must scale the biomass by the combined area of    !
-                  ! this patch and site so the total carbon is preserved.                  !
-                  !------------------------------------------------------------------------!
-                  csite%repro(donpft,recpa) = csite%repro(donpft,recpa)                    &
-                                            + bseed_maygo * csite%area(donpa)
-                  !------------------------------------------------------------------------!
-
-
-
-
-                  !------------------------------------------------------------------------!
-                  !      Include the local dispersal if this is the donor patch.           !
-                  !------------------------------------------------------------------------!
-                  if (recpa == donpa) then
-                     csite%repro(donpft,recpa) = csite%repro(donpft,recpa) + bseed_stays
-                  end if
-                  !------------------------------------------------------------------------!
-
-               end do recpaloop1
-               !---------------------------------------------------------------------------!
-            end do doncoloop1
-            !------------------------------------------------------------------------------!
-         end do donpaloop1
-         !---------------------------------------------------------------------------------!
-      end do siteloop1 
-      !------------------------------------------------------------------------------------!
-
-   case (2,3)
-
-      !------------------------------------------------------------------------------------!
-      !     Seeds are dispersed amongst patches that belong to the same polygon.  They are !
-      ! allowed to go from one site to the other, but they cannot go outside their native  !
-      ! polygon.                                                                           !
-      !------------------------------------------------------------------------------------!
-
-      !------------------------------------------------------------------------------------!
-      !      Loop over the donor cohorts.                                                  !
-      !------------------------------------------------------------------------------------!
-      donsiloop2: do donsi = 1,cpoly%nsites
-         donsite => cpoly%site(donsi)
-
-         donpaloop2: do donpa = 1,donsite%npatches
-            donpatch => donsite%patch(donpa)
-
-            doncoloop2: do donco = 1, donpatch%ncohorts
-
-               !----- Define an alias for PFT. --------------------------------------------!
-               donpft = donpatch%pft(donco)
-
-               !---------------------------------------------------------------------------!
-               !    Find the biomass of survivor seedlings.  Units: kgC/m2                 !
-               !---------------------------------------------------------------------------!
-               if (phenology(donpft) /= 2 .or. late_spring) then
-                  bseedling   = donpatch%nplant(donco) * donpatch%bseeds(donco)            &
-                              * (1.0 - seedling_mortality(donpft))
-
-                  select case (ibigleaf)
-                  case (0)
-                     bseed_stays = bseedling * (1.0 - nonlocal_dispersal(donpft))
-                     bseed_maygo = bseedling * nonlocal_dispersal(donpft)
-                  case (1)
-                     !---- if bigleaf cannot disperse seedlings to other patches ----------!
-                     bseed_stays = bseedling
-                     bseed_maygo = 0.
-                  end select
-               else
-                  !----- Not a good time for reproduction.  No seedlings. -----------------!
-                  bseedling   = 0.
-                  bseed_stays = 0.
-                  bseed_maygo = 0.
-               end if
-               !---------------------------------------------------------------------------!
-               
-               !---------------------------------------------------------------------------!
-               !   Spread the seedlings across all patches in this polygon.                !
-               !---------------------------------------------------------------------------!
-               recsiloop2: do recsi = 1,cpoly%nsites
-                  recsite => cpoly%site(recsi)
-                  recpaloop2: do recpa = 1,recsite%npatches
-
-                     !---------------------------------------------------------------------!
-                     !     Add the non-local dispersal evenly across all patches,          !
-                     ! including the donor patch.  We must scale the biomass by the        !
-                     ! combined area of this patch and site so the total carbon is         !
-                     ! preserved.                                                          !
-                     !---------------------------------------------------------------------!
-                     recsite%repro(donpft,recpa) = recsite%repro(donpft,recpa)             &
-                                                 + bseed_maygo * recsite%area(donpa)       &
-                                                 * cpoly%area(donsi)
-                     !---------------------------------------------------------------------!
-
-                     !---------------------------------------------------------------------!
-                     !      Include the local dispersal if this is the donor patch.        !
-                     !---------------------------------------------------------------------!
-                     if (recpa == donpa .and. recsi == donsi) then
-                        recsite%repro(donpft,recpa) = recsite%repro(donpft,recpa)          &
-                                                    + bseed_stays
-                     end if
-                     !---------------------------------------------------------------------!
-                     
-                  end do recpaloop2
-                  !------------------------------------------------------------------------!
-               end do recsiloop2
-               !---------------------------------------------------------------------------!
-            end do doncoloop2
-            !------------------------------------------------------------------------------!
-         end do donpaloop2
-         !---------------------------------------------------------------------------------!
-      end do donsiloop2
-      !------------------------------------------------------------------------------------!
-
-
-   end select
-   return
-end subroutine seed_dispersal
-!==========================================================================================!
-!==========================================================================================!

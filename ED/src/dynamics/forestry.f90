@@ -1,3 +1,343 @@
+module mod_forestry
+contains
+!==========================================================================================!
+!==========================================================================================!
+!    This sub-routine calculates the area and total biomass associated with mature primary !
+! forests, mature secondary forests, and mature forest plantations.                        !
+!------------------------------------------------------------------------------------------!
+subroutine inventory_mat_forests(cpoly,isi,onsp,harvestable_agb                            &
+                                ,area_mature_primary   , hvagb_mature_primary              &
+                                ,area_mature_secondary , hvagb_mature_secondary            &
+                                ,area_mature_plantation, hvagb_mature_plantation )
+   use ed_state_vars , only : polygontype         & ! structure
+                            , sitetype            ! ! structure
+   use disturb_coms  , only : plantation_rotation & ! intent(in)
+                            , mature_harvest_age  & ! intent(in)
+                            , min_harvest_biomass ! ! intent(in)
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(polygontype)    , target      :: cpoly
+   integer              , intent(in)  :: isi
+   integer              , intent(in)  :: onsp
+   real, dimension(onsp), intent(in)  :: harvestable_agb
+   real                 , intent(out) :: area_mature_primary
+   real                 , intent(out) :: hvagb_mature_primary
+   real                 , intent(out) :: area_mature_secondary
+   real                 , intent(out) :: hvagb_mature_secondary
+   real                 , intent(out) :: area_mature_plantation
+   real                 , intent(out) :: hvagb_mature_plantation
+   !----- Local variables -----------------------------------------------------------------!
+   type(sitetype)       , pointer     :: csite
+   integer                            :: ipa
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !----- Initialize inventory. -----------------------------------------------------------!
+   area_mature_primary     = 0.0
+   area_mature_secondary   = 0.0
+   area_mature_plantation  = 0.0
+   hvagb_mature_primary    = 0.0
+   hvagb_mature_secondary  = 0.0
+   hvagb_mature_plantation = 0.0
+   !---------------------------------------------------------------------------------------!
+
+   csite => cpoly%site(isi)
+   patchloop: do ipa=1,csite%npatches
+
+      !----- Skip the patch if the biomass is low. ----------------------------------------!
+      if (harvestable_agb(ipa) < min_harvest_biomass) cycle patchloop
+      !------------------------------------------------------------------------------------!
+
+
+      !------------------------------------------------------------------------------------!
+      !      Run some checks to determine the type of forest and whether it has reached    !
+      ! maturity.  TO DO: check whether George Hurtt's data consider burnt patches primary !
+      ! or secondary.                                                                      !
+      !------------------------------------------------------------------------------------!
+      select case (csite%dist_type(ipa))
+      case (2)
+         !---- Forest plantation. ---------------------------------------------------------!
+         if (csite%age(ipa) > plantation_rotation) then
+            area_mature_plantation   = area_mature_plantation + csite%area(ipa)
+            hvagb_mature_plantation  = hvagb_mature_plantation                             &
+                                     + harvestable_agb(ipa)   * csite%area(ipa)
+         end if
+         !---------------------------------------------------------------------------------!
+
+      case (3)
+         !---- Primary forest. ------------------------------------------------------------!
+         if (csite%age(ipa) > mature_harvest_age) then
+            area_mature_primary      = area_mature_primary + csite%area(ipa)
+            hvagb_mature_primary     = hvagb_mature_primary                                &
+                                     + harvestable_agb(ipa)   * csite%area(ipa)
+         end if
+         !---------------------------------------------------------------------------------!
+
+      case (4,5,6)
+         !---- Secondary forest. ----------------------------------------------------------!
+         if (csite%age(ipa) > mature_harvest_age) then
+            area_mature_secondary   = area_mature_secondary   + csite%area(ipa)
+            hvagb_mature_secondary  = hvagb_mature_secondary                               &
+                                    + harvestable_agb(ipa)    * csite%area(ipa)
+         end if
+         !---------------------------------------------------------------------------------!
+      case default
+         !----- Probably pasture/croplands, skip the patch. -------------------------------!
+         continue
+         !---------------------------------------------------------------------------------!
+      end select 
+      !------------------------------------------------------------------------------------!
+   end do patchloop
+   !---------------------------------------------------------------------------------------!
+
+   return
+end subroutine inventory_mat_forests
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+!    This subroutine finds the area of mature patches that is going to be harvested.       !
+!------------------------------------------------------------------------------------------!
+subroutine area_harvest_mature(cpoly,isi,onsp,harvestable_agb,pot_area_harv                &
+                              ,lambda_mature_primary,lambda_mature_secondary               &
+                              ,lambda_mature_plantation)
+   use ed_state_vars    , only : polygontype          & ! structure
+                               , sitetype             ! ! structure
+   use disturb_coms     , only : mature_harvest_age   & ! intent(in)
+                               , plantation_rotation  & ! intent(in)
+                               , min_harvest_biomass  ! ! intent(in)
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(polygontype)                  , target        :: cpoly
+   integer                            , intent(in)    :: isi
+   integer                            , intent(in)    :: onsp
+   real, dimension(onsp)              , intent(inout) :: harvestable_agb
+   real, dimension(onsp)              , intent(inout) :: pot_area_harv
+   real                               , intent(in)    :: lambda_mature_plantation
+   real                               , intent(in)    :: lambda_mature_secondary
+   real                               , intent(in)    :: lambda_mature_primary
+   !----- Local variables -----------------------------------------------------------------!
+   type(sitetype)                     , pointer       :: csite
+   integer                                            :: ipa
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !----- Select patch. -------------------------------------------------------------------!
+   csite => cpoly%site(isi)
+   !---------------------------------------------------------------------------------------!
+
+
+   !---------------------------------------------------------------------------------------!
+   !      Loop over patches.                                                               ! 
+   !---------------------------------------------------------------------------------------!
+   patch_loop: do ipa=1,onsp
+  
+      !----- Skip patch in case the biomass is less than the minimum for harvesting. ------!
+      if (harvestable_agb(ipa) < min_harvest_biomass) cycle patch_loop
+      !------------------------------------------------------------------------------------!
+
+      !------------------------------------------------------------------------------------!
+      !    Find out whether to harvest this patch.                                         !
+      !------------------------------------------------------------------------------------!
+      select case (csite%dist_type(ipa))
+      case (2)
+         !----- Forest plantation. --------------------------------------------------------!
+         if ( csite%age(ipa) > plantation_rotation ) then
+            pot_area_harv(ipa) = csite%area(ipa) * lambda_mature_plantation
+         end if
+         !---------------------------------------------------------------------------------!
+
+      case (3)
+         !----- Primary forest. -----------------------------------------------------------!
+         if ( csite%age(ipa) > mature_harvest_age  ) then
+            pot_area_harv(ipa) = csite%area(ipa) * lambda_mature_primary
+         end if
+         !---------------------------------------------------------------------------------!
+
+      case (4,5,6)
+         !----- Secondary forest. ---------------------------------------------------------!
+         if ( csite%age(ipa) > mature_harvest_age  ) then
+            pot_area_harv(ipa) = csite%area(ipa) * lambda_mature_secondary
+         end if
+         !---------------------------------------------------------------------------------!
+      case default
+         !----- Agriculture.  Do not log. -------------------------------------------------!
+         continue
+         !---------------------------------------------------------------------------------!
+      end select
+      !------------------------------------------------------------------------------------!
+   end do patch_loop
+   !---------------------------------------------------------------------------------------!
+
+
+   return
+end subroutine area_harvest_mature
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+!    This subroutine finds the area of mature patches that has to be harvested to meet the !
+! demand for biomass.                                                                      !
+!------------------------------------------------------------------------------------------!
+subroutine area_harvest_immature(cpoly,isi,onsp,harvestable_agb,pot_area_harv              &
+                                ,harvest_deficit)
+   use ed_state_vars     , only : polygontype          & ! structure
+                                , sitetype             & ! structure
+                                , patchtype            ! ! structure
+   use disturb_coms      , only : plantation_rotation  & ! intent(in)
+                                , mature_harvest_age   & ! intent(in)
+                                , min_harvest_biomass  ! ! intent(in)
+   implicit none
+
+   !----- Arguments -----------------------------------------------------------------------!
+   type(polygontype)                  , target        :: cpoly
+   integer                            , intent(in)    :: isi
+   integer                            , intent(in)    :: onsp
+   real, dimension(onsp)              , intent(in)    :: harvestable_agb
+   real, dimension(onsp)              , intent(inout) :: pot_area_harv
+   real                               , intent(inout) :: harvest_deficit
+   !----- Local variables -----------------------------------------------------------------!
+   type(sitetype)                     , pointer       :: csite
+   integer                                            :: ipa
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !----- Select patch. -------------------------------------------------------------------!
+   csite => cpoly%site(isi)
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !---------------------------------------------------------------------------------------!
+   !      First loop, try to obtain the biomass from forest plantations.                   !
+   !---------------------------------------------------------------------------------------!
+   patch_loop_fopl: do ipa=1,onsp
+      !------------------------------------------------------------------------------------!
+      !      Harvest this patch if it is has enough biomass, is a plantation, and is       !
+      ! immature.                                                                          !
+      !------------------------------------------------------------------------------------!
+      if (  harvestable_agb(ipa) >= min_harvest_biomass  .and.                             &
+            csite%dist_type(ipa) == 2                    .and.                             &
+            csite%age(ipa)       <  plantation_rotation        ) then
+         !----- Immature patch is harvestable.  Check how much to harvest. ----------------!
+         if( (csite%area(ipa) * harvestable_agb(ipa)) > harvest_deficit) then
+            !------------------------------------------------------------------------------!
+            !      Biomass target has been met, partially harvest the patch, then quit the !
+            ! sub-routine.                                                                 !
+            !------------------------------------------------------------------------------!
+            pot_area_harv(ipa) = harvest_deficit / harvestable_agb(ipa)
+            harvest_deficit    = 0.0
+            return
+            !------------------------------------------------------------------------------!
+         else
+            !------------------------------------------------------------------------------!
+            !      Biomass target has not been met, harvest the entire patch, and keep     !
+            ! searching for biomass.                                                       !
+            !------------------------------------------------------------------------------!
+            pot_area_harv(ipa) = csite%area(ipa)
+            harvest_deficit    = harvest_deficit - csite%area(ipa) * harvestable_agb(ipa)
+            !------------------------------------------------------------------------------!
+         end if
+         !---------------------------------------------------------------------------------!
+      end if
+      !------------------------------------------------------------------------------------!
+   end do patch_loop_fopl
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !---------------------------------------------------------------------------------------!
+   !      Second loop, try to obtain the biomass from secondary forests.                   !
+   !---------------------------------------------------------------------------------------!
+   patch_loop_2ary: do ipa=1,onsp
+      !------------------------------------------------------------------------------------!
+      !      Harvest this patch if it is has enough biomass, is a secondary forest, and is !
+      ! immature.                                                                          !
+      !------------------------------------------------------------------------------------!
+      if (  harvestable_agb(ipa) >= min_harvest_biomass  .and.                             &
+            csite%dist_type(ipa) >= 4                    .and.                             &
+            csite%dist_type(ipa) <= 6                    .and.                             &
+            csite%age(ipa)       <  mature_harvest_age         ) then
+         !----- Immature patch is harvestable.  Check how much to harvest. ----------------!
+         if( (csite%area(ipa) * harvestable_agb(ipa)) > harvest_deficit) then
+            !------------------------------------------------------------------------------!
+            !      Biomass target has been met, partially harvest the patch, then quit the !
+            ! sub-routine.                                                                 !
+            !------------------------------------------------------------------------------!
+            pot_area_harv(ipa) = harvest_deficit / harvestable_agb(ipa)
+            harvest_deficit    = 0.0
+            return
+            !------------------------------------------------------------------------------!
+         else
+            !------------------------------------------------------------------------------!
+            !      Biomass target has not been met, harvest the entire patch, and keep     !
+            ! searching for biomass.                                                       !
+            !------------------------------------------------------------------------------!
+            pot_area_harv(ipa) = csite%area(ipa)
+            harvest_deficit    = harvest_deficit - csite%area(ipa) * harvestable_agb(ipa)
+            !------------------------------------------------------------------------------!
+         end if
+         !---------------------------------------------------------------------------------!
+      end if
+      !------------------------------------------------------------------------------------!
+   end do patch_loop_2ary
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !---------------------------------------------------------------------------------------!
+   !      Final loop, try to obtain the biomass from primary forests.                      !
+   !---------------------------------------------------------------------------------------!
+   patch_loop_1ary: do ipa=1,onsp
+      !------------------------------------------------------------------------------------!
+      !      Harvest this patch if it is has enough biomass, is a primary forest, and is   !
+      ! immature.                                                                          !
+      !------------------------------------------------------------------------------------!
+      if (  harvestable_agb(ipa) >= min_harvest_biomass  .and.                             &
+            csite%dist_type(ipa) == 3                    .and.                             &
+            csite%age(ipa)       <  mature_harvest_age         ) then
+         !----- Immature patch is harvestable.  Check how much to harvest. ----------------!
+         if( (csite%area(ipa) * harvestable_agb(ipa)) > harvest_deficit) then
+            !------------------------------------------------------------------------------!
+            !      Biomass target has been met, partially harvest the patch, then quit the !
+            ! sub-routine.                                                                 !
+            !------------------------------------------------------------------------------!
+            pot_area_harv(ipa) = harvest_deficit / harvestable_agb(ipa)
+            harvest_deficit    = 0.0
+            return
+            !------------------------------------------------------------------------------!
+         else
+            !------------------------------------------------------------------------------!
+            !      Biomass target has not been met, harvest the entire patch, and keep     !
+            ! searching for biomass.                                                       !
+            !------------------------------------------------------------------------------!
+            pot_area_harv(ipa) = csite%area(ipa)
+            harvest_deficit    = harvest_deficit - csite%area(ipa) * harvestable_agb(ipa)
+            !------------------------------------------------------------------------------!
+         end if
+         !---------------------------------------------------------------------------------!
+      end if
+      !------------------------------------------------------------------------------------!
+   end do patch_loop_1ary
+   !---------------------------------------------------------------------------------------!
+
+   return
+end subroutine area_harvest_immature
+!==========================================================================================!
+!==========================================================================================!
+end module mod_forestry
+
 !==========================================================================================!
 ! Forestry.f90. These subroutines calculate the area to be taken from each patch to meet   !
 !               the biomass demand, in case this site is to be harvest using biomass       !
@@ -300,101 +640,6 @@ end subroutine find_harvest_area
 
 
 
-!==========================================================================================!
-!==========================================================================================!
-!    This sub-routine calculates the area and total biomass associated with mature primary !
-! forests, mature secondary forests, and mature forest plantations.                        !
-!------------------------------------------------------------------------------------------!
-subroutine inventory_mat_forests(cpoly,isi,onsp,harvestable_agb                            &
-                                ,area_mature_primary   , hvagb_mature_primary              &
-                                ,area_mature_secondary , hvagb_mature_secondary            &
-                                ,area_mature_plantation, hvagb_mature_plantation )
-   use ed_state_vars , only : polygontype         & ! structure
-                            , sitetype            ! ! structure
-   use disturb_coms  , only : plantation_rotation & ! intent(in)
-                            , mature_harvest_age  & ! intent(in)
-                            , min_harvest_biomass ! ! intent(in)
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(polygontype)    , target      :: cpoly
-   integer              , intent(in)  :: isi
-   integer              , intent(in)  :: onsp
-   real, dimension(onsp), intent(in)  :: harvestable_agb
-   real                 , intent(out) :: area_mature_primary
-   real                 , intent(out) :: hvagb_mature_primary
-   real                 , intent(out) :: area_mature_secondary
-   real                 , intent(out) :: hvagb_mature_secondary
-   real                 , intent(out) :: area_mature_plantation
-   real                 , intent(out) :: hvagb_mature_plantation
-   !----- Local variables -----------------------------------------------------------------!
-   type(sitetype)       , pointer     :: csite
-   integer                            :: ipa
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !----- Initialize inventory. -----------------------------------------------------------!
-   area_mature_primary     = 0.0
-   area_mature_secondary   = 0.0
-   area_mature_plantation  = 0.0
-   hvagb_mature_primary    = 0.0
-   hvagb_mature_secondary  = 0.0
-   hvagb_mature_plantation = 0.0
-   !---------------------------------------------------------------------------------------!
-
-   csite => cpoly%site(isi)
-   patchloop: do ipa=1,csite%npatches
-
-      !----- Skip the patch if the biomass is low. ----------------------------------------!
-      if (harvestable_agb(ipa) < min_harvest_biomass) cycle patchloop
-      !------------------------------------------------------------------------------------!
-
-
-      !------------------------------------------------------------------------------------!
-      !      Run some checks to determine the type of forest and whether it has reached    !
-      ! maturity.  TO DO: check whether George Hurtt's data consider burnt patches primary !
-      ! or secondary.                                                                      !
-      !------------------------------------------------------------------------------------!
-      select case (csite%dist_type(ipa))
-      case (2)
-         !---- Forest plantation. ---------------------------------------------------------!
-         if (csite%age(ipa) > plantation_rotation) then
-            area_mature_plantation   = area_mature_plantation + csite%area(ipa)
-            hvagb_mature_plantation  = hvagb_mature_plantation                             &
-                                     + harvestable_agb(ipa)   * csite%area(ipa)
-         end if
-         !---------------------------------------------------------------------------------!
-
-      case (3)
-         !---- Primary forest. ------------------------------------------------------------!
-         if (csite%age(ipa) > mature_harvest_age) then
-            area_mature_primary      = area_mature_primary + csite%area(ipa)
-            hvagb_mature_primary     = hvagb_mature_primary                                &
-                                     + harvestable_agb(ipa)   * csite%area(ipa)
-         end if
-         !---------------------------------------------------------------------------------!
-
-      case (4,5,6)
-         !---- Secondary forest. ----------------------------------------------------------!
-         if (csite%age(ipa) > mature_harvest_age) then
-            area_mature_secondary   = area_mature_secondary   + csite%area(ipa)
-            hvagb_mature_secondary  = hvagb_mature_secondary                               &
-                                    + harvestable_agb(ipa)    * csite%area(ipa)
-         end if
-         !---------------------------------------------------------------------------------!
-      case default
-         !----- Probably pasture/croplands, skip the patch. -------------------------------!
-         continue
-         !---------------------------------------------------------------------------------!
-      end select 
-      !------------------------------------------------------------------------------------!
-   end do patchloop
-   !---------------------------------------------------------------------------------------!
-
-   return
-end subroutine inventory_mat_forests
-!==========================================================================================!
-!==========================================================================================!
 
 
 
@@ -477,242 +722,9 @@ end subroutine mat_forest_harv_rates
 
 
 
-!==========================================================================================!
-!==========================================================================================!
-!    This subroutine finds the area of mature patches that is going to be harvested.       !
-!------------------------------------------------------------------------------------------!
-subroutine area_harvest_mature(cpoly,isi,onsp,harvestable_agb,pot_area_harv                &
-                              ,lambda_mature_primary,lambda_mature_secondary               &
-                              ,lambda_mature_plantation)
-   use ed_state_vars    , only : polygontype          & ! structure
-                               , sitetype             ! ! structure
-   use disturb_coms     , only : mature_harvest_age   & ! intent(in)
-                               , plantation_rotation  & ! intent(in)
-                               , min_harvest_biomass  ! ! intent(in)
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(polygontype)                  , target        :: cpoly
-   integer                            , intent(in)    :: isi
-   integer                            , intent(in)    :: onsp
-   real, dimension(onsp)              , intent(inout) :: harvestable_agb
-   real, dimension(onsp)              , intent(inout) :: pot_area_harv
-   real                               , intent(in)    :: lambda_mature_plantation
-   real                               , intent(in)    :: lambda_mature_secondary
-   real                               , intent(in)    :: lambda_mature_primary
-   !----- Local variables -----------------------------------------------------------------!
-   type(sitetype)                     , pointer       :: csite
-   integer                                            :: ipa
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !----- Select patch. -------------------------------------------------------------------!
-   csite => cpoly%site(isi)
-   !---------------------------------------------------------------------------------------!
-
-
-   !---------------------------------------------------------------------------------------!
-   !      Loop over patches.                                                               ! 
-   !---------------------------------------------------------------------------------------!
-   patch_loop: do ipa=1,onsp
-  
-      !----- Skip patch in case the biomass is less than the minimum for harvesting. ------!
-      if (harvestable_agb(ipa) < min_harvest_biomass) cycle patch_loop
-      !------------------------------------------------------------------------------------!
-
-      !------------------------------------------------------------------------------------!
-      !    Find out whether to harvest this patch.                                         !
-      !------------------------------------------------------------------------------------!
-      select case (csite%dist_type(ipa))
-      case (2)
-         !----- Forest plantation. --------------------------------------------------------!
-         if ( csite%age(ipa) > plantation_rotation ) then
-            pot_area_harv(ipa) = csite%area(ipa) * lambda_mature_plantation
-         end if
-         !---------------------------------------------------------------------------------!
-
-      case (3)
-         !----- Primary forest. -----------------------------------------------------------!
-         if ( csite%age(ipa) > mature_harvest_age  ) then
-            pot_area_harv(ipa) = csite%area(ipa) * lambda_mature_primary
-         end if
-         !---------------------------------------------------------------------------------!
-
-      case (4,5,6)
-         !----- Secondary forest. ---------------------------------------------------------!
-         if ( csite%age(ipa) > mature_harvest_age  ) then
-            pot_area_harv(ipa) = csite%area(ipa) * lambda_mature_secondary
-         end if
-         !---------------------------------------------------------------------------------!
-      case default
-         !----- Agriculture.  Do not log. -------------------------------------------------!
-         continue
-         !---------------------------------------------------------------------------------!
-      end select
-      !------------------------------------------------------------------------------------!
-   end do patch_loop
-   !---------------------------------------------------------------------------------------!
-
-
-   return
-end subroutine area_harvest_mature
-!==========================================================================================!
-!==========================================================================================!
 
 
 
 
 
 
-!==========================================================================================!
-!==========================================================================================!
-!    This subroutine finds the area of mature patches that has to be harvested to meet the !
-! demand for biomass.                                                                      !
-!------------------------------------------------------------------------------------------!
-subroutine area_harvest_immature(cpoly,isi,onsp,harvestable_agb,pot_area_harv              &
-                                ,harvest_deficit)
-   use ed_state_vars     , only : polygontype          & ! structure
-                                , sitetype             & ! structure
-                                , patchtype            ! ! structure
-   use disturb_coms      , only : plantation_rotation  & ! intent(in)
-                                , mature_harvest_age   & ! intent(in)
-                                , min_harvest_biomass  ! ! intent(in)
-   implicit none
-
-   !----- Arguments -----------------------------------------------------------------------!
-   type(polygontype)                  , target        :: cpoly
-   integer                            , intent(in)    :: isi
-   integer                            , intent(in)    :: onsp
-   real, dimension(onsp)              , intent(in)    :: harvestable_agb
-   real, dimension(onsp)              , intent(inout) :: pot_area_harv
-   real                               , intent(inout) :: harvest_deficit
-   !----- Local variables -----------------------------------------------------------------!
-   type(sitetype)                     , pointer       :: csite
-   integer                                            :: ipa
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !----- Select patch. -------------------------------------------------------------------!
-   csite => cpoly%site(isi)
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !---------------------------------------------------------------------------------------!
-   !      First loop, try to obtain the biomass from forest plantations.                   !
-   !---------------------------------------------------------------------------------------!
-   patch_loop_fopl: do ipa=1,onsp
-      !------------------------------------------------------------------------------------!
-      !      Harvest this patch if it is has enough biomass, is a plantation, and is       !
-      ! immature.                                                                          !
-      !------------------------------------------------------------------------------------!
-      if (  harvestable_agb(ipa) >= min_harvest_biomass  .and.                             &
-            csite%dist_type(ipa) == 2                    .and.                             &
-            csite%age(ipa)       <  plantation_rotation        ) then
-         !----- Immature patch is harvestable.  Check how much to harvest. ----------------!
-         if( (csite%area(ipa) * harvestable_agb(ipa)) > harvest_deficit) then
-            !------------------------------------------------------------------------------!
-            !      Biomass target has been met, partially harvest the patch, then quit the !
-            ! sub-routine.                                                                 !
-            !------------------------------------------------------------------------------!
-            pot_area_harv(ipa) = harvest_deficit / harvestable_agb(ipa)
-            harvest_deficit    = 0.0
-            return
-            !------------------------------------------------------------------------------!
-         else
-            !------------------------------------------------------------------------------!
-            !      Biomass target has not been met, harvest the entire patch, and keep     !
-            ! searching for biomass.                                                       !
-            !------------------------------------------------------------------------------!
-            pot_area_harv(ipa) = csite%area(ipa)
-            harvest_deficit    = harvest_deficit - csite%area(ipa) * harvestable_agb(ipa)
-            !------------------------------------------------------------------------------!
-         end if
-         !---------------------------------------------------------------------------------!
-      end if
-      !------------------------------------------------------------------------------------!
-   end do patch_loop_fopl
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !---------------------------------------------------------------------------------------!
-   !      Second loop, try to obtain the biomass from secondary forests.                   !
-   !---------------------------------------------------------------------------------------!
-   patch_loop_2ary: do ipa=1,onsp
-      !------------------------------------------------------------------------------------!
-      !      Harvest this patch if it is has enough biomass, is a secondary forest, and is !
-      ! immature.                                                                          !
-      !------------------------------------------------------------------------------------!
-      if (  harvestable_agb(ipa) >= min_harvest_biomass  .and.                             &
-            csite%dist_type(ipa) >= 4                    .and.                             &
-            csite%dist_type(ipa) <= 6                    .and.                             &
-            csite%age(ipa)       <  mature_harvest_age         ) then
-         !----- Immature patch is harvestable.  Check how much to harvest. ----------------!
-         if( (csite%area(ipa) * harvestable_agb(ipa)) > harvest_deficit) then
-            !------------------------------------------------------------------------------!
-            !      Biomass target has been met, partially harvest the patch, then quit the !
-            ! sub-routine.                                                                 !
-            !------------------------------------------------------------------------------!
-            pot_area_harv(ipa) = harvest_deficit / harvestable_agb(ipa)
-            harvest_deficit    = 0.0
-            return
-            !------------------------------------------------------------------------------!
-         else
-            !------------------------------------------------------------------------------!
-            !      Biomass target has not been met, harvest the entire patch, and keep     !
-            ! searching for biomass.                                                       !
-            !------------------------------------------------------------------------------!
-            pot_area_harv(ipa) = csite%area(ipa)
-            harvest_deficit    = harvest_deficit - csite%area(ipa) * harvestable_agb(ipa)
-            !------------------------------------------------------------------------------!
-         end if
-         !---------------------------------------------------------------------------------!
-      end if
-      !------------------------------------------------------------------------------------!
-   end do patch_loop_2ary
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !---------------------------------------------------------------------------------------!
-   !      Final loop, try to obtain the biomass from primary forests.                      !
-   !---------------------------------------------------------------------------------------!
-   patch_loop_1ary: do ipa=1,onsp
-      !------------------------------------------------------------------------------------!
-      !      Harvest this patch if it is has enough biomass, is a primary forest, and is   !
-      ! immature.                                                                          !
-      !------------------------------------------------------------------------------------!
-      if (  harvestable_agb(ipa) >= min_harvest_biomass  .and.                             &
-            csite%dist_type(ipa) == 3                    .and.                             &
-            csite%age(ipa)       <  mature_harvest_age         ) then
-         !----- Immature patch is harvestable.  Check how much to harvest. ----------------!
-         if( (csite%area(ipa) * harvestable_agb(ipa)) > harvest_deficit) then
-            !------------------------------------------------------------------------------!
-            !      Biomass target has been met, partially harvest the patch, then quit the !
-            ! sub-routine.                                                                 !
-            !------------------------------------------------------------------------------!
-            pot_area_harv(ipa) = harvest_deficit / harvestable_agb(ipa)
-            harvest_deficit    = 0.0
-            return
-            !------------------------------------------------------------------------------!
-         else
-            !------------------------------------------------------------------------------!
-            !      Biomass target has not been met, harvest the entire patch, and keep     !
-            ! searching for biomass.                                                       !
-            !------------------------------------------------------------------------------!
-            pot_area_harv(ipa) = csite%area(ipa)
-            harvest_deficit    = harvest_deficit - csite%area(ipa) * harvestable_agb(ipa)
-            !------------------------------------------------------------------------------!
-         end if
-         !---------------------------------------------------------------------------------!
-      end if
-      !------------------------------------------------------------------------------------!
-   end do patch_loop_1ary
-   !---------------------------------------------------------------------------------------!
-
-   return
-end subroutine area_harvest_immature
-!==========================================================================================!
-!==========================================================================================!

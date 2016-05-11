@@ -1,106 +1,5 @@
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine is the main procedure that will take care of reading the meteoro-    !
-! logic data to be used during the run.                                                    !
-!------------------------------------------------------------------------------------------!
-subroutine read_met_driver_head()
-   use ed_max_dims    , only : max_met_vars     ! ! intent(in)
-   use met_driver_coms, only : nformats         & ! intent(in)
-                             , met_names        & ! intent(out)
-                             , met_nlon         & ! intent(out)
-                             , met_nlat         & ! intent(out)
-                             , met_dx           & ! intent(out)
-                             , met_dy           & ! intent(out)
-                             , met_xmin         & ! intent(out)
-                             , met_ymin         & ! intent(out)
-                             , met_nv           & ! intent(out)
-                             , met_vars         & ! intent(out)
-                             , met_frq          & ! intent(out)
-                             , met_interp       & ! intent(out)
-                             , ed_met_driver_db & ! intent(out)
-                             , no_ll            ! ! intent(out)
-   implicit none  
-   !----- Local variables -----------------------------------------------------------------!
-   logical :: l1
-   logical :: yes_lat     ! Logical for determining whether latitude grids are present
-   logical :: yes_lon     ! Logical for determining whether longitude grids are present
-   integer :: iformat
-   integer :: n
-   !---------------------------------------------------------------------------------------!
-
-
-   !----- First thing, let's check whether the meterological data metafile exists. --------!
-   inquire(file=trim(ed_met_driver_db),exist=l1)
-   if (.not. l1) then
-      write (unit=*,fmt='(a)') 'File '//trim(ed_met_driver_db)//' not found!'
-      write (unit=*,fmt='(a)') 'Specify ED_MET_DRIVER_DB properly in ED namelist.'
-      call fatal_error('Ed_met_driver_db not found!','read_met_driver_head'                &
-                      &,'ed_met_driver.f90')
-   end if
-   !---------------------------------------------------------------------------------------!
-
-
-   !----- Loading the meterorological data metafile information. --------------------------!
-   open(unit=12,file=trim(ed_met_driver_db),form='formatted',status='old')
-   read(unit=12,fmt=*)  ! skip header
-
-   !------ Read the number of different file formats. -------------------------------------!
-   read(unit=12,fmt=*) nformats
-   !------ Allocate the header information for each format --------------------------------!
-   allocate(met_names (nformats)              )
-   allocate(met_nlon  (nformats)              )
-   allocate(met_nlat  (nformats)              )
-   allocate(met_dx    (nformats)              )
-   allocate(met_dy    (nformats)              )
-   allocate(met_xmin  (nformats)              )
-   allocate(met_ymin  (nformats)              )
-   allocate(met_nv    (nformats)              )
-   allocate(met_vars  (nformats, max_met_vars))
-   allocate(met_frq   (nformats, max_met_vars))
-   allocate(met_interp(nformats, max_met_vars))
-   allocate(no_ll     (nformats)              )
-
-   !----- Just to initialize, if lon/lat are both found, it will become .false. -----------!
-   no_ll(:) = .true.    
-   !----- Read the information for each format. -------------------------------------------!
-   do iformat = 1,nformats
-      read(unit=12,fmt='(a)')  met_names(iformat)
-      read(unit=12,fmt=*)      met_nlon(iformat), met_nlat(iformat), met_dx(iformat)       &
-                             , met_dy(iformat)  , met_xmin(iformat), met_ymin(iformat)
-      read(unit=12,fmt=*)      met_nv(iformat)
-      read(unit=12,fmt=*)      (met_vars(iformat,n)  ,n=1,met_nv(iformat))
-      read(unit=12,fmt=*)      (met_frq(iformat,n)   ,n=1,met_nv(iformat))
-      read(unit=12,fmt=*)      (met_interp(iformat,n),n=1,met_nv(iformat))
-      
-      !----- Just making sure that the variable list is case insensitive. -----------------!
-      call tolower(met_vars(iformat,1:met_nv(iformat)),met_nv(iformat))
-      
-      !----- First check - see if lat/lon data are there. ---------------------------------!
-      yes_lon = any(met_vars(iformat,1:met_nv(iformat)) == 'lon')
-      yes_lat = any(met_vars(iformat,1:met_nv(iformat)) == 'lat')
-      
-
-      !----- Check to see if you have both, none or one of each. --------------------------!
-      if (yes_lat .and. yes_lon) then
-         no_ll (iformat) = .false.
-      elseif (yes_lat .neqv. yes_lon) then
-         call fatal_error('You are missing a lat or a lon variable in the met nl'          &
-                         ,'read_met_driver_head','ed_met_driver.f90')
-      end if
-   end do
-
-   close (unit=12,status='keep')
-
-   return
-end subroutine read_met_driver_head
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
+module mod_read_met_driver_head
+contains
 !==========================================================================================!
 !==========================================================================================!
 !    This subroutine will initialise the arrays that will temporarily receive the meteoro- !
@@ -3133,4 +3032,108 @@ subroutine getll(cgrid,iformat)
 end subroutine getll
 !==========================================================================================!
 !==========================================================================================!
+
+end module
+!==========================================================================================!
+!==========================================================================================!
+!     This subroutine is the main procedure that will take care of reading the meteoro-    !
+! logic data to be used during the run.                                                    !
+!------------------------------------------------------------------------------------------!
+subroutine read_met_driver_head()
+   use ed_max_dims    , only : max_met_vars     ! ! intent(in)
+   use met_driver_coms, only : nformats         & ! intent(in)
+                             , met_names        & ! intent(out)
+                             , met_nlon         & ! intent(out)
+                             , met_nlat         & ! intent(out)
+                             , met_dx           & ! intent(out)
+                             , met_dy           & ! intent(out)
+                             , met_xmin         & ! intent(out)
+                             , met_ymin         & ! intent(out)
+                             , met_nv           & ! intent(out)
+                             , met_vars         & ! intent(out)
+                             , met_frq          & ! intent(out)
+                             , met_interp       & ! intent(out)
+                             , ed_met_driver_db & ! intent(out)
+                             , no_ll            ! ! intent(out)
+   implicit none  
+   !----- Local variables -----------------------------------------------------------------!
+   logical :: l1
+   logical :: yes_lat     ! Logical for determining whether latitude grids are present
+   logical :: yes_lon     ! Logical for determining whether longitude grids are present
+   integer :: iformat
+   integer :: n
+   !---------------------------------------------------------------------------------------!
+
+
+   !----- First thing, let's check whether the meterological data metafile exists. --------!
+   inquire(file=trim(ed_met_driver_db),exist=l1)
+   if (.not. l1) then
+      write (unit=*,fmt='(a)') 'File '//trim(ed_met_driver_db)//' not found!'
+      write (unit=*,fmt='(a)') 'Specify ED_MET_DRIVER_DB properly in ED namelist.'
+      call fatal_error('Ed_met_driver_db not found!','read_met_driver_head'                &
+                      &,'ed_met_driver.f90')
+   end if
+   !---------------------------------------------------------------------------------------!
+
+
+   !----- Loading the meterorological data metafile information. --------------------------!
+   open(unit=12,file=trim(ed_met_driver_db),form='formatted',status='old')
+   read(unit=12,fmt=*)  ! skip header
+
+   !------ Read the number of different file formats. -------------------------------------!
+   read(unit=12,fmt=*) nformats
+   !------ Allocate the header information for each format --------------------------------!
+   allocate(met_names (nformats)              )
+   allocate(met_nlon  (nformats)              )
+   allocate(met_nlat  (nformats)              )
+   allocate(met_dx    (nformats)              )
+   allocate(met_dy    (nformats)              )
+   allocate(met_xmin  (nformats)              )
+   allocate(met_ymin  (nformats)              )
+   allocate(met_nv    (nformats)              )
+   allocate(met_vars  (nformats, max_met_vars))
+   allocate(met_frq   (nformats, max_met_vars))
+   allocate(met_interp(nformats, max_met_vars))
+   allocate(no_ll     (nformats)              )
+
+   !----- Just to initialize, if lon/lat are both found, it will become .false. -----------!
+   no_ll(:) = .true.    
+   !----- Read the information for each format. -------------------------------------------!
+   do iformat = 1,nformats
+      read(unit=12,fmt='(a)')  met_names(iformat)
+      read(unit=12,fmt=*)      met_nlon(iformat), met_nlat(iformat), met_dx(iformat)       &
+                             , met_dy(iformat)  , met_xmin(iformat), met_ymin(iformat)
+      read(unit=12,fmt=*)      met_nv(iformat)
+      read(unit=12,fmt=*)      (met_vars(iformat,n)  ,n=1,met_nv(iformat))
+      read(unit=12,fmt=*)      (met_frq(iformat,n)   ,n=1,met_nv(iformat))
+      read(unit=12,fmt=*)      (met_interp(iformat,n),n=1,met_nv(iformat))
+      
+      !----- Just making sure that the variable list is case insensitive. -----------------!
+      call tolower(met_vars(iformat,1:met_nv(iformat)),met_nv(iformat))
+      
+      !----- First check - see if lat/lon data are there. ---------------------------------!
+      yes_lon = any(met_vars(iformat,1:met_nv(iformat)) == 'lon')
+      yes_lat = any(met_vars(iformat,1:met_nv(iformat)) == 'lat')
+      
+
+      !----- Check to see if you have both, none or one of each. --------------------------!
+      if (yes_lat .and. yes_lon) then
+         no_ll (iformat) = .false.
+      elseif (yes_lat .neqv. yes_lon) then
+         call fatal_error('You are missing a lat or a lon variable in the met nl'          &
+                         ,'read_met_driver_head','ed_met_driver.f90')
+      end if
+   end do
+
+   close (unit=12,status='keep')
+
+   return
+end subroutine read_met_driver_head
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
 

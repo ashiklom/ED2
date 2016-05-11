@@ -1,9 +1,224 @@
+module mod_rk4_misc
+contains
+!==========================================================================================!
+!==========================================================================================!
+!    This subroutine prints the patch and cohort information when the model falls apart... !
+!------------------------------------------------------------------------------------------!
+subroutine print_csiteipa(csite, ipa)
+   use rk4_coms              , only : rk4site       ! ! intent(in)
+   use ed_state_vars         , only : sitetype      & ! structure
+                                    , patchtype     ! ! structure
+   use ed_misc_coms          , only : current_time  ! ! intent(in)
+   use grid_coms             , only : nzs           & ! intent(in)
+                                    , nzg           ! ! intent(in)
+   use ed_max_dims           , only : n_pft         ! ! intent(in)
+   use consts_coms           , only : day_sec       & ! intent(in)
+                                    , umol_2_kgC    ! ! intent(in)
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(sitetype)  , target     :: csite
+   integer         , intent(in) :: ipa
+   !----- Local variable ------------------------------------------------------------------!
+   type(patchtype) , pointer    :: cpatch
+   integer                      :: ico
+   integer                      :: k
+   real                         :: leaf_growth_resp
+   real                         :: root_growth_resp
+   real                         :: sapa_growth_resp
+   real                         :: sapb_growth_resp
+   real                         :: leaf_storage_resp
+   real                         :: root_storage_resp
+   real                         :: sapa_storage_resp
+   real                         :: sapb_storage_resp
+   real                         :: pss_lai
+   real                         :: pss_wai
+   !---------------------------------------------------------------------------------------!
+
+   cpatch => csite%patch(ipa)
+
+
+   !----- Find the total patch LAI and WAI. -----------------------------------------------!
+   pss_lai = 0.0
+   pss_wai = 0.0
+   do ico=1,cpatch%ncohorts
+      pss_lai = pss_lai + cpatch%lai(ico)
+      pss_wai = pss_wai + cpatch%wai(ico)
+   end do
+   !---------------------------------------------------------------------------------------!
+
+
+   write(unit=*,fmt='(80a)') ('=',k=1,80)
+   write(unit=*,fmt='(80a)') ('=',k=1,80)
+
+   write(unit=*,fmt='(a)')  ' |||| Printing PATCH information (csite) ||||'
+
+   write(unit=*,fmt='(80a)') ('-',k=1,80)
+
+   write (unit=*,fmt='(a,1x,2(i2.2,a),i4.4,1x,3(i2.2,a))')                                 &
+         'Time:',current_time%month,'/',current_time%date,'/',current_time%year            &
+                ,current_time%hour,':',current_time%min,':',current_time%sec,' UTC'
+   write(unit=*,fmt='(a,1x,es12.4)') 'Attempted step size:',csite%htry(ipa)
+   write (unit=*,fmt='(a,1x,i6)')    'Ncohorts: ',cpatch%ncohorts
+ 
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+   write (unit=*,fmt='(a)'  ) 'Leaf information (only the resolvable ones shown): '
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+   write (unit=*,fmt='(2(a7,1x),10(a12,1x))')                                              &
+         '    PFT','KRDEPTH','      NPLANT','         LAI','         DBH','       BDEAD'   &
+                            ,'       BLEAF',' LEAF_ENERGY','  LEAF_WATER','   LEAF_HCAP'   &
+                            ,'   LEAF_TEMP','   LEAF_FLIQ'
+   do ico = 1,cpatch%ncohorts
+      if (cpatch%leaf_resolvable(ico)) then
+         write(unit=*,fmt='(2(i7,1x),10(es12.4,1x))') cpatch%pft(ico), cpatch%krdepth(ico) &
+              ,cpatch%nplant(ico),cpatch%lai(ico),cpatch%dbh(ico),cpatch%bdead(ico)        &
+              ,cpatch%bleaf(ico),cpatch%leaf_energy(ico),cpatch%leaf_water(ico)            &
+              ,cpatch%leaf_hcap(ico),cpatch%leaf_temp(ico),cpatch%leaf_fliq(ico)
+      end if
+   end do
+   write (unit=*,fmt='(2(a7,1x),6(a12,1x))')                                               &
+         '    PFT','KRDEPTH','         LAI','     FS_OPEN','         FSW','         FSN'   &
+                            ,'         GPP','   LEAF_RESP'
+   do ico = 1,cpatch%ncohorts
+      if (cpatch%leaf_resolvable(ico)) then
+         write(unit=*,fmt='(2(i7,1x),6(es12.4,1x))') cpatch%pft(ico), cpatch%krdepth(ico)  &
+              ,cpatch%lai(ico),cpatch%fs_open(ico),cpatch%fsw(ico),cpatch%fsn(ico)         &
+              ,cpatch%gpp(ico),cpatch%leaf_respiration(ico)
+      end if
+   end do
+   write (unit=*,fmt='(2(a7,1x),2(a12,1x),8(a16,1x))')                                     &
+         '    PFT','KRDEPTH','         LAI','   ROOT_RESP'                                 &
+        ,'  LEAF_STORE_RESP','  ROOT_STORE_RESP','  SAPA_STORE_RESP','  SAPB_STORE_RESP'   &
+        ,' LEAF_GROWTH_RESP',' ROOT_GROWTH_RESP',' SAPA_GROWTH_RESP',' SAPB_GROWTH_RESP'
+   do ico = 1,cpatch%ncohorts
+      if (cpatch%leaf_resolvable(ico)) then
+         leaf_growth_resp  = cpatch%leaf_growth_resp(ico) * cpatch%nplant(ico)             &
+                           / (day_sec * umol_2_kgC)
+         root_growth_resp  = cpatch%root_growth_resp(ico) * cpatch%nplant(ico)             &
+                           / (day_sec * umol_2_kgC)
+         sapa_growth_resp  = cpatch%sapa_growth_resp(ico) * cpatch%nplant(ico)             &
+                           / (day_sec * umol_2_kgC)
+         sapb_growth_resp  = cpatch%sapb_growth_resp(ico) * cpatch%nplant(ico)             &
+                           / (day_sec * umol_2_kgC)
+         leaf_storage_resp = cpatch%leaf_storage_resp(ico) * cpatch%nplant(ico)            &
+                           / (day_sec * umol_2_kgC)
+         root_storage_resp = cpatch%root_storage_resp(ico) * cpatch%nplant(ico)            &
+                           / (day_sec * umol_2_kgC)
+         sapa_storage_resp = cpatch%sapa_storage_resp(ico) * cpatch%nplant(ico)            &
+                           / (day_sec * umol_2_kgC)
+         sapb_storage_resp = cpatch%sapb_storage_resp(ico) * cpatch%nplant(ico)            &
+                           / (day_sec * umol_2_kgC)
+
+         write(unit=*,fmt='(2(i7,1x),3(es12.4,1x),4(es17.4,1x))')                          &
+               cpatch%pft(ico), cpatch%krdepth(ico)                                        &
+              ,cpatch%lai(ico),cpatch%root_respiration(ico)                                &
+              ,leaf_storage_resp, root_storage_resp, sapa_storage_resp, sapb_storage_resp  &
+              ,leaf_growth_resp , root_growth_resp , sapa_growth_resp , sapb_growth_resp
+      end if
+   end do
+   write (unit=*,fmt='(a)'  ) ' '
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+   write (unit=*,fmt='(a)'  ) 'Wood information (only the resolvable ones shown): '
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+   write (unit=*,fmt='(2(a7,1x),9(a12,1x))')                                               &
+         '    PFT','KRDEPTH','      NPLANT','         WAI','         DBH','       BDEAD'   &
+                            ,'   BSAPWOODA','   BSAPWOODB',' WOOD_ENERGY','   WOOD_TEMP'   &
+                            ,'  WOOD_WATER'
+   do ico = 1,cpatch%ncohorts
+      if (cpatch%wood_resolvable(ico)) then
+         write(unit=*,fmt='(2(i7,1x),9(es12.4,1x))') cpatch%pft(ico), cpatch%krdepth(ico)  &
+              ,cpatch%nplant(ico),cpatch%wai(ico),cpatch%dbh(ico),cpatch%bdead(ico)        &
+              ,cpatch%bsapwooda(ico),cpatch%bsapwoodb(ico),cpatch%wood_energy(ico)         &
+              ,cpatch%wood_temp(ico),cpatch%wood_water(ico)
+      end if
+   end do
+   write (unit=*,fmt='(a)'  ) ' '
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+
+   write (unit=*,fmt='(8(a12,1x))')  '   DIST_TYPE','         AGE','        AREA'          &
+                                    ,'          RH','      CWD_RH','AVGDAILY_TMP'          &
+                                    ,'     SUM_CHD','     SUM_DGD'
+   write (unit=*,fmt='(i12,1x,7(es12.4,1x))')  csite%dist_type(ipa),csite%age(ipa)         &
+         ,csite%area(ipa),csite%rh(ipa),csite%cwd_rh(ipa),csite%avg_daily_temp(ipa)        &
+         ,csite%sum_chd(ipa),csite%sum_dgd(ipa)
+
+   write (unit=*,fmt='(a)'  ) ' '
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+
+   write (unit=*,fmt='(8(a12,1x))')  '  VEG_HEIGHT','   VEG_ROUGH','VEG_DISPLACE'          &
+                                    ,'   PATCH_LAI','   PATCH_WAI','        HTRY'          &
+                                    ,'    CAN_RHOS','   CAN_DEPTH'
+   write (unit=*,fmt='(8(es12.4,1x))') csite%veg_height(ipa),csite%veg_rough(ipa)          &
+                                      ,csite%veg_displace(ipa),pss_lai,pss_wai             &
+                                      ,csite%htry(ipa),csite%can_rhos(ipa)                 &
+                                      ,csite%can_depth(ipa)
+
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+
+   write (unit=*,fmt='(7(a12,1x))')  '   CAN_THEIV','    CAN_TEMP','     CAN_SHV'          &
+                                    ,'    CAN_PRSS','     CAN_CO2','   CAN_VPDEF'          &
+                                    ,'       GGNET'
+   write (unit=*,fmt='(7(es12.4,1x))')  csite%can_theiv (ipa),csite%can_temp  (ipa)        &
+                                      , csite%can_shv   (ipa),csite%can_prss  (ipa)        &
+                                      , csite%can_co2   (ipa),csite%can_vpdef (ipa)        &
+                                      , csite%ggnet     (ipa)
+
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+
+   write (unit=*,fmt='(10(a12,1x))')  '       USTAR','       QSTAR','       CSTAR'         &
+                                     ,'       TSTAR','        ZETA','     RI_BULK'         &
+                                     ,'     RLONG_G','    RSHORT_G','       PAR_G'         &
+                                     ,'     RLONG_S'
+   write (unit=*,fmt='(10(es12.4,1x))') csite%ustar(ipa),csite%qstar(ipa),csite%cstar(ipa) &
+                                       ,csite%tstar(ipa),csite%zeta(ipa),csite%ribulk(ipa) &
+                                       ,csite%rlong_g(ipa),csite%rshort_g(ipa)             &
+                                       ,csite%par_g(ipa),csite%rlong_s(ipa)
+
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+
+   write (unit=*,fmt='(a5,1x,a12)') '  PFT','       REPRO'
+   do k=1,n_pft
+      write (unit=*,fmt='(i5,1x,es12.4)') k,csite%repro(k,ipa)
+   end do
+
+   write (unit=*,fmt='(80a)') ('-',k=1,80)
+
+   write (unit=*,fmt='(a5,1x,5(a12,1x))')   '  KZG','  NTEXT_SOIL',' SOIL_ENERGY'          &
+                                   &,'  SOIL_TEMPK','  SOIL_WATER','SOIL_FRACLIQ'
+   do k=rk4site%lsl,nzg
+      write (unit=*,fmt='(i5,1x,i12,4(es12.4,1x))') k,rk4site%ntext_soil(k)                &
+            ,csite%soil_energy(k,ipa),csite%soil_tempk(k,ipa),csite%soil_water(k,ipa)      &
+            ,csite%soil_fracliq(k,ipa)
+   end do
+   
+   if (csite%nlev_sfcwater(ipa) >= 1) then
+      write (unit=*,fmt='(80a)') ('-',k=1,80)
+      write (unit=*,fmt='(a5,1x,7(a12,1x))')   '  KZS',' SFCW_ENERGY','  SFCW_TEMPK'       &
+                                       ,'   SFCW_MASS','SFCW_FRACLIQ','  SFCW_DEPTH'       &
+                                       ,'    RSHORT_S','       PAR_S'
+      do k=1,csite%nlev_sfcwater(ipa)
+         write (unit=*,fmt='(i5,1x,7(es12.4,1x))') k,csite%sfcwater_energy(k,ipa)          &
+               ,csite%sfcwater_tempk(k,ipa),csite%sfcwater_mass(k,ipa)                     &
+               ,csite%sfcwater_fracliq(k,ipa),csite%sfcwater_depth(k,ipa)                  &
+               ,csite%rshort_s(k,ipa),csite%par_s(k,ipa)
+      end do
+   end if
+
+   write(unit=*,fmt='(80a)') ('=',k=1,80)
+   write(unit=*,fmt='(80a)') ('=',k=1,80)
+   write(unit=*,fmt='(a)'  ) ' '
+   return
+end subroutine print_csiteipa
+!==========================================================================================!
+!==========================================================================================!
+end module mod_rk4_misc
 !==========================================================================================!
 !==========================================================================================!
 !    This subroutine copies that variables that are integrated by the Runge-Kutta solver   !
 ! to a buffer structure.                                                                   !
 !------------------------------------------------------------------------------------------!
 subroutine copy_patch_init(sourcesite,ipa,targetp,vels)
+   use mod_rk4_misc
    use ed_state_vars         , only : sitetype               & ! structure
                                     , patchtype              ! ! structure
    use grid_coms             , only : nzg                    & ! intent(in)
@@ -3449,224 +3664,6 @@ subroutine print_errmax(errmax,yerr,yscal,cpatch,y,ytemp)
 end subroutine print_errmax
 !==========================================================================================!
 !==========================================================================================!
-
-
-
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-!    This subroutine prints the patch and cohort information when the model falls apart... !
-!------------------------------------------------------------------------------------------!
-subroutine print_csiteipa(csite, ipa)
-   use rk4_coms              , only : rk4site       ! ! intent(in)
-   use ed_state_vars         , only : sitetype      & ! structure
-                                    , patchtype     ! ! structure
-   use ed_misc_coms          , only : current_time  ! ! intent(in)
-   use grid_coms             , only : nzs           & ! intent(in)
-                                    , nzg           ! ! intent(in)
-   use ed_max_dims           , only : n_pft         ! ! intent(in)
-   use consts_coms           , only : day_sec       & ! intent(in)
-                                    , umol_2_kgC    ! ! intent(in)
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(sitetype)  , target     :: csite
-   integer         , intent(in) :: ipa
-   !----- Local variable ------------------------------------------------------------------!
-   type(patchtype) , pointer    :: cpatch
-   integer                      :: ico
-   integer                      :: k
-   real                         :: leaf_growth_resp
-   real                         :: root_growth_resp
-   real                         :: sapa_growth_resp
-   real                         :: sapb_growth_resp
-   real                         :: leaf_storage_resp
-   real                         :: root_storage_resp
-   real                         :: sapa_storage_resp
-   real                         :: sapb_storage_resp
-   real                         :: pss_lai
-   real                         :: pss_wai
-   !---------------------------------------------------------------------------------------!
-
-   cpatch => csite%patch(ipa)
-
-
-   !----- Find the total patch LAI and WAI. -----------------------------------------------!
-   pss_lai = 0.0
-   pss_wai = 0.0
-   do ico=1,cpatch%ncohorts
-      pss_lai = pss_lai + cpatch%lai(ico)
-      pss_wai = pss_wai + cpatch%wai(ico)
-   end do
-   !---------------------------------------------------------------------------------------!
-
-
-   write(unit=*,fmt='(80a)') ('=',k=1,80)
-   write(unit=*,fmt='(80a)') ('=',k=1,80)
-
-   write(unit=*,fmt='(a)')  ' |||| Printing PATCH information (csite) ||||'
-
-   write(unit=*,fmt='(80a)') ('-',k=1,80)
-
-   write (unit=*,fmt='(a,1x,2(i2.2,a),i4.4,1x,3(i2.2,a))')                                 &
-         'Time:',current_time%month,'/',current_time%date,'/',current_time%year            &
-                ,current_time%hour,':',current_time%min,':',current_time%sec,' UTC'
-   write(unit=*,fmt='(a,1x,es12.4)') 'Attempted step size:',csite%htry(ipa)
-   write (unit=*,fmt='(a,1x,i6)')    'Ncohorts: ',cpatch%ncohorts
- 
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-   write (unit=*,fmt='(a)'  ) 'Leaf information (only the resolvable ones shown): '
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-   write (unit=*,fmt='(2(a7,1x),10(a12,1x))')                                              &
-         '    PFT','KRDEPTH','      NPLANT','         LAI','         DBH','       BDEAD'   &
-                            ,'       BLEAF',' LEAF_ENERGY','  LEAF_WATER','   LEAF_HCAP'   &
-                            ,'   LEAF_TEMP','   LEAF_FLIQ'
-   do ico = 1,cpatch%ncohorts
-      if (cpatch%leaf_resolvable(ico)) then
-         write(unit=*,fmt='(2(i7,1x),10(es12.4,1x))') cpatch%pft(ico), cpatch%krdepth(ico) &
-              ,cpatch%nplant(ico),cpatch%lai(ico),cpatch%dbh(ico),cpatch%bdead(ico)        &
-              ,cpatch%bleaf(ico),cpatch%leaf_energy(ico),cpatch%leaf_water(ico)            &
-              ,cpatch%leaf_hcap(ico),cpatch%leaf_temp(ico),cpatch%leaf_fliq(ico)
-      end if
-   end do
-   write (unit=*,fmt='(2(a7,1x),6(a12,1x))')                                               &
-         '    PFT','KRDEPTH','         LAI','     FS_OPEN','         FSW','         FSN'   &
-                            ,'         GPP','   LEAF_RESP'
-   do ico = 1,cpatch%ncohorts
-      if (cpatch%leaf_resolvable(ico)) then
-         write(unit=*,fmt='(2(i7,1x),6(es12.4,1x))') cpatch%pft(ico), cpatch%krdepth(ico)  &
-              ,cpatch%lai(ico),cpatch%fs_open(ico),cpatch%fsw(ico),cpatch%fsn(ico)         &
-              ,cpatch%gpp(ico),cpatch%leaf_respiration(ico)
-      end if
-   end do
-   write (unit=*,fmt='(2(a7,1x),2(a12,1x),8(a16,1x))')                                     &
-         '    PFT','KRDEPTH','         LAI','   ROOT_RESP'                                 &
-        ,'  LEAF_STORE_RESP','  ROOT_STORE_RESP','  SAPA_STORE_RESP','  SAPB_STORE_RESP'   &
-        ,' LEAF_GROWTH_RESP',' ROOT_GROWTH_RESP',' SAPA_GROWTH_RESP',' SAPB_GROWTH_RESP'
-   do ico = 1,cpatch%ncohorts
-      if (cpatch%leaf_resolvable(ico)) then
-         leaf_growth_resp  = cpatch%leaf_growth_resp(ico) * cpatch%nplant(ico)             &
-                           / (day_sec * umol_2_kgC)
-         root_growth_resp  = cpatch%root_growth_resp(ico) * cpatch%nplant(ico)             &
-                           / (day_sec * umol_2_kgC)
-         sapa_growth_resp  = cpatch%sapa_growth_resp(ico) * cpatch%nplant(ico)             &
-                           / (day_sec * umol_2_kgC)
-         sapb_growth_resp  = cpatch%sapb_growth_resp(ico) * cpatch%nplant(ico)             &
-                           / (day_sec * umol_2_kgC)
-         leaf_storage_resp = cpatch%leaf_storage_resp(ico) * cpatch%nplant(ico)            &
-                           / (day_sec * umol_2_kgC)
-         root_storage_resp = cpatch%root_storage_resp(ico) * cpatch%nplant(ico)            &
-                           / (day_sec * umol_2_kgC)
-         sapa_storage_resp = cpatch%sapa_storage_resp(ico) * cpatch%nplant(ico)            &
-                           / (day_sec * umol_2_kgC)
-         sapb_storage_resp = cpatch%sapb_storage_resp(ico) * cpatch%nplant(ico)            &
-                           / (day_sec * umol_2_kgC)
-
-         write(unit=*,fmt='(2(i7,1x),3(es12.4,1x),4(es17.4,1x))')                          &
-               cpatch%pft(ico), cpatch%krdepth(ico)                                        &
-              ,cpatch%lai(ico),cpatch%root_respiration(ico)                                &
-              ,leaf_storage_resp, root_storage_resp, sapa_storage_resp, sapb_storage_resp  &
-              ,leaf_growth_resp , root_growth_resp , sapa_growth_resp , sapb_growth_resp
-      end if
-   end do
-   write (unit=*,fmt='(a)'  ) ' '
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-   write (unit=*,fmt='(a)'  ) 'Wood information (only the resolvable ones shown): '
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-   write (unit=*,fmt='(2(a7,1x),9(a12,1x))')                                               &
-         '    PFT','KRDEPTH','      NPLANT','         WAI','         DBH','       BDEAD'   &
-                            ,'   BSAPWOODA','   BSAPWOODB',' WOOD_ENERGY','   WOOD_TEMP'   &
-                            ,'  WOOD_WATER'
-   do ico = 1,cpatch%ncohorts
-      if (cpatch%wood_resolvable(ico)) then
-         write(unit=*,fmt='(2(i7,1x),9(es12.4,1x))') cpatch%pft(ico), cpatch%krdepth(ico)  &
-              ,cpatch%nplant(ico),cpatch%wai(ico),cpatch%dbh(ico),cpatch%bdead(ico)        &
-              ,cpatch%bsapwooda(ico),cpatch%bsapwoodb(ico),cpatch%wood_energy(ico)         &
-              ,cpatch%wood_temp(ico),cpatch%wood_water(ico)
-      end if
-   end do
-   write (unit=*,fmt='(a)'  ) ' '
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-
-   write (unit=*,fmt='(8(a12,1x))')  '   DIST_TYPE','         AGE','        AREA'          &
-                                    ,'          RH','      CWD_RH','AVGDAILY_TMP'          &
-                                    ,'     SUM_CHD','     SUM_DGD'
-   write (unit=*,fmt='(i12,1x,7(es12.4,1x))')  csite%dist_type(ipa),csite%age(ipa)         &
-         ,csite%area(ipa),csite%rh(ipa),csite%cwd_rh(ipa),csite%avg_daily_temp(ipa)        &
-         ,csite%sum_chd(ipa),csite%sum_dgd(ipa)
-
-   write (unit=*,fmt='(a)'  ) ' '
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-
-   write (unit=*,fmt='(8(a12,1x))')  '  VEG_HEIGHT','   VEG_ROUGH','VEG_DISPLACE'          &
-                                    ,'   PATCH_LAI','   PATCH_WAI','        HTRY'          &
-                                    ,'    CAN_RHOS','   CAN_DEPTH'
-   write (unit=*,fmt='(8(es12.4,1x))') csite%veg_height(ipa),csite%veg_rough(ipa)          &
-                                      ,csite%veg_displace(ipa),pss_lai,pss_wai             &
-                                      ,csite%htry(ipa),csite%can_rhos(ipa)                 &
-                                      ,csite%can_depth(ipa)
-
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-
-   write (unit=*,fmt='(7(a12,1x))')  '   CAN_THEIV','    CAN_TEMP','     CAN_SHV'          &
-                                    ,'    CAN_PRSS','     CAN_CO2','   CAN_VPDEF'          &
-                                    ,'       GGNET'
-   write (unit=*,fmt='(7(es12.4,1x))')  csite%can_theiv (ipa),csite%can_temp  (ipa)        &
-                                      , csite%can_shv   (ipa),csite%can_prss  (ipa)        &
-                                      , csite%can_co2   (ipa),csite%can_vpdef (ipa)        &
-                                      , csite%ggnet     (ipa)
-
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-
-   write (unit=*,fmt='(10(a12,1x))')  '       USTAR','       QSTAR','       CSTAR'         &
-                                     ,'       TSTAR','        ZETA','     RI_BULK'         &
-                                     ,'     RLONG_G','    RSHORT_G','       PAR_G'         &
-                                     ,'     RLONG_S'
-   write (unit=*,fmt='(10(es12.4,1x))') csite%ustar(ipa),csite%qstar(ipa),csite%cstar(ipa) &
-                                       ,csite%tstar(ipa),csite%zeta(ipa),csite%ribulk(ipa) &
-                                       ,csite%rlong_g(ipa),csite%rshort_g(ipa)             &
-                                       ,csite%par_g(ipa),csite%rlong_s(ipa)
-
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-
-   write (unit=*,fmt='(a5,1x,a12)') '  PFT','       REPRO'
-   do k=1,n_pft
-      write (unit=*,fmt='(i5,1x,es12.4)') k,csite%repro(k,ipa)
-   end do
-
-   write (unit=*,fmt='(80a)') ('-',k=1,80)
-
-   write (unit=*,fmt='(a5,1x,5(a12,1x))')   '  KZG','  NTEXT_SOIL',' SOIL_ENERGY'          &
-                                   &,'  SOIL_TEMPK','  SOIL_WATER','SOIL_FRACLIQ'
-   do k=rk4site%lsl,nzg
-      write (unit=*,fmt='(i5,1x,i12,4(es12.4,1x))') k,rk4site%ntext_soil(k)                &
-            ,csite%soil_energy(k,ipa),csite%soil_tempk(k,ipa),csite%soil_water(k,ipa)      &
-            ,csite%soil_fracliq(k,ipa)
-   end do
-   
-   if (csite%nlev_sfcwater(ipa) >= 1) then
-      write (unit=*,fmt='(80a)') ('-',k=1,80)
-      write (unit=*,fmt='(a5,1x,7(a12,1x))')   '  KZS',' SFCW_ENERGY','  SFCW_TEMPK'       &
-                                       ,'   SFCW_MASS','SFCW_FRACLIQ','  SFCW_DEPTH'       &
-                                       ,'    RSHORT_S','       PAR_S'
-      do k=1,csite%nlev_sfcwater(ipa)
-         write (unit=*,fmt='(i5,1x,7(es12.4,1x))') k,csite%sfcwater_energy(k,ipa)          &
-               ,csite%sfcwater_tempk(k,ipa),csite%sfcwater_mass(k,ipa)                     &
-               ,csite%sfcwater_fracliq(k,ipa),csite%sfcwater_depth(k,ipa)                  &
-               ,csite%rshort_s(k,ipa),csite%par_s(k,ipa)
-      end do
-   end if
-
-   write(unit=*,fmt='(80a)') ('=',k=1,80)
-   write(unit=*,fmt='(80a)') ('=',k=1,80)
-   write(unit=*,fmt='(a)'  ) ' '
-   return
-end subroutine print_csiteipa
-!==========================================================================================!
-!==========================================================================================!
-
 
 
 

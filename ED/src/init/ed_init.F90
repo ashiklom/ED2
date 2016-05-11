@@ -1,3 +1,147 @@
+module ed_inits
+    contains
+        !==========================================================================================!
+        !==========================================================================================!
+        !     This subroutine prints the soil properties for a single-polygon run.                 !
+        !------------------------------------------------------------------------------------------!
+        subroutine print_soil_info(cgrid,ifm)
+        use ed_state_vars  , only : edtype            & ! structure
+                                    , polygontype       ! ! structure
+        use mem_polygons   , only : n_poi             ! ! intent(in)
+        use soil_coms      , only : isoilflg          & ! intent(in)
+                                    , soil              & ! intent(in)
+                                    , slxclay           & ! intent(in)
+                                    , slxsand           ! ! intent(in)
+        use grid_coms      , only : nzg               ! ! intent(in)
+        use ed_misc_coms   , only : sfilout           ! ! intent(in)
+        use ed_max_dims    , only : str_len
+        implicit none
+
+        !----- Arguments. ----------------------------------------------------------------------!
+        type(edtype)          , target     :: cgrid
+        integer               , intent(in) :: ifm
+        !----- Local variables. ----------------------------------------------------------------!
+        type(polygontype)     , pointer    :: cpoly
+        character(len=str_len)             :: polyname
+        logical                            :: prescribed
+        integer                            :: nsoil
+        integer                            :: ipy
+        integer                            :: isi
+        integer                            :: slash
+        integer                            :: endstr
+        !---------------------------------------------------------------------------------------!
+        
+        if (ifm /=1 .or. n_poi /= 1 .or. cgrid%npolygons /= 1) return
+        ipy = 1
+        cpoly => cgrid%polygon(ipy)
+
+        !----- Find the polygon name. ----------------------------------------------------------!
+        slash    = index(sfilout,'/',back=.true.) + 1
+        endstr   = len_trim(sfilout)
+        polyname = sfilout(slash:endstr)
+
+        !----- Find whether the soil type characteristics were re-defined. ---------------------!
+        prescribed = isoilflg(ifm)==2 .and. slxclay > 0. .and. slxsand > 0. .and.               &
+                        (slxclay + slxsand) <= 1.
+
+        write (unit=*,fmt='(a)')           ' '
+        write (unit=*,fmt='(a)') '   --------------------------------------------------------'
+        write (unit=*,fmt='(a)')           '    Soil information:'
+        write (unit=*,fmt='(a)')           ' '
+        write (unit=*,fmt='(a,1x,a)')      '    Polygon name               :',trim(polyname)
+        write (unit=*,fmt='(a,1x,f11.3)')  '    Longitude                  :',cgrid%lon(ipy)
+        write (unit=*,fmt='(a,1x,f11.3)')  '    Latitude                   :',cgrid%lat(ipy)
+        write (unit=*,fmt='(a,11x,l1)')    '    Prescribed sand and clay   :',prescribed
+        write (unit=*,fmt='(a,1x,i11)')    '    # of sites                 :',cpoly%nsites
+
+        do isi = 1,cpoly%nsites
+            nsoil = cpoly%ntext_soil(nzg,isi)
+            write (unit=*,fmt='(a)')          ' '
+            write (unit=*,fmt='(a,1x,i11)')   '    Site :',isi
+            write (unit=*,fmt='(a,1x,i10)')   '      - Type :',nsoil
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Clay fraction  =', soil(nsoil)%xclay
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Sand fraction  =', soil(nsoil)%xsand
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Silt fraction  =', soil(nsoil)%xsilt
+            write(unit=*,fmt='(a,1x,es12.5)') '      - SLBS           =', soil(nsoil)%slbs
+            write(unit=*,fmt='(a,1x,es12.5)') '      - SLPOTS         =', soil(nsoil)%slpots
+            write(unit=*,fmt='(a,1x,es12.5)') '      - SLCONS         =', soil(nsoil)%slcons
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Dry air soil   =', soil(nsoil)%soilcp
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Wilting point  =', soil(nsoil)%soilwp
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Field capacity =', soil(nsoil)%sfldcap
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Saturation     =', soil(nsoil)%slmsts
+            write(unit=*,fmt='(a,1x,es12.5)') '      - Heat capacity  =', soil(nsoil)%slcpd
+        end do
+        write (unit=*,fmt='(a)') '   --------------------------------------------------------'
+        write (unit=*,fmt='(a)') ' '
+
+
+        return
+        end subroutine print_soil_info
+        !==========================================================================================!
+        !==========================================================================================!
+        !     This subroutine fills the lsl, soil colour, and soil texture based on the defaults.  !
+        ! In case isoildepthflg was zero, then the layer_index matrix was filled with ones, so we  !
+        ! do not need to worry about this here.                                                    !
+        !------------------------------------------------------------------------------------------!
+        subroutine soil_default_fill(cgrid,ifm,ipy)
+        
+        use soil_coms     , only : layer_index ! ! intent(in)
+        use ed_state_vars , only : edtype      & ! structure
+                                    , polygontype ! ! structure
+        use ed_work_vars  , only : work_v      ! ! structure
+        use grid_coms     , only : nzg         ! ! intent(in)
+        implicit none
+        !----- Arguments -----------------------------------------------------------------------!
+        type(edtype) , target       :: cgrid
+        integer      , intent(in)   :: ifm
+        integer      , intent(in)   :: ipy
+        !----- Local variables -----------------------------------------------------------------!
+        type(polygontype) , pointer :: cpoly
+        integer                     :: ilat_bin
+        integer                     :: ilon_bin
+        integer                     :: isi
+        integer                     :: k
+        !---------------------------------------------------------------------------------------!
+
+
+        ilat_bin = min(180,int(90.0 - cgrid%lat(ipy)) + 1)
+        ilon_bin = int(180.0 + cgrid%lon(ipy)) + 1
+
+        cpoly => cgrid%polygon(ipy)
+        do isi=1,cpoly%nsites
+            !------------------------------------------------------------------------------------!
+            !    Require at least 2 layers.  This requirement was taken in consideration when    !
+            ! layer_index was filled at the first initialization, so it is safe to just copy.    !
+            !------------------------------------------------------------------------------------!
+            cpoly%lsl(isi) =layer_index(ilat_bin,ilon_bin) 
+            !------------------------------------------------------------------------------------!
+
+
+            !------------------------------------------------------------------------------------!
+            !     Use the commonest soil type and populate the site-level soil texture.          !
+            !------------------------------------------------------------------------------------!
+            do k=1,nzg
+                cpoly%ntext_soil(k,isi) = work_v(ifm)%ntext(1,ipy)
+            end do
+            !------------------------------------------------------------------------------------!
+
+
+            !------------------------------------------------------------------------------------!
+            !     Use the polygon-level soil colour to populate the site-level.                  !
+            !------------------------------------------------------------------------------------!
+            cpoly%ncol_soil(isi) = work_v(ifm)%nscol(ipy)
+            !------------------------------------------------------------------------------------!
+        end do
+        !---------------------------------------------------------------------------------------!
+
+        return
+        end subroutine soil_default_fill
+        !==========================================================================================!
+        !==========================================================================================!
+end module 
+!==========================================================================================!
+!==========================================================================================!
+
 !==========================================================================================!
 !==========================================================================================!
 !    This subroutine will assign the longitude, latitude, and soil class for all non-empty !
@@ -56,6 +200,7 @@ end subroutine set_polygon_coordinates
 ! ied_init_node 3 or 4.                                                                    !
 !------------------------------------------------------------------------------------------!
 subroutine set_site_defprops()
+   use ed_inits
    use grid_coms     , only : ngrids               & ! intent(in)
                             , nzg                  ! ! intent(in)
    use ed_work_vars  , only : work_v               ! ! structure
@@ -230,67 +375,6 @@ end subroutine set_site_defprops
 
 
 
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine fills the lsl, soil colour, and soil texture based on the defaults.  !
-! In case isoildepthflg was zero, then the layer_index matrix was filled with ones, so we  !
-! do not need to worry about this here.                                                    !
-!------------------------------------------------------------------------------------------!
-subroutine soil_default_fill(cgrid,ifm,ipy)
-   
-   use soil_coms     , only : layer_index ! ! intent(in)
-   use ed_state_vars , only : edtype      & ! structure
-                            , polygontype ! ! structure
-   use ed_work_vars  , only : work_v      ! ! structure
-   use grid_coms     , only : nzg         ! ! intent(in)
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(edtype) , target       :: cgrid
-   integer      , intent(in)   :: ifm
-   integer      , intent(in)   :: ipy
-   !----- Local variables -----------------------------------------------------------------!
-   type(polygontype) , pointer :: cpoly
-   integer                     :: ilat_bin
-   integer                     :: ilon_bin
-   integer                     :: isi
-   integer                     :: k
-   !---------------------------------------------------------------------------------------!
-
-
-   ilat_bin = min(180,int(90.0 - cgrid%lat(ipy)) + 1)
-   ilon_bin = int(180.0 + cgrid%lon(ipy)) + 1
-
-   cpoly => cgrid%polygon(ipy)
-   do isi=1,cpoly%nsites
-      !------------------------------------------------------------------------------------!
-      !    Require at least 2 layers.  This requirement was taken in consideration when    !
-      ! layer_index was filled at the first initialization, so it is safe to just copy.    !
-      !------------------------------------------------------------------------------------!
-      cpoly%lsl(isi) =layer_index(ilat_bin,ilon_bin) 
-      !------------------------------------------------------------------------------------!
-
-
-      !------------------------------------------------------------------------------------!
-      !     Use the commonest soil type and populate the site-level soil texture.          !
-      !------------------------------------------------------------------------------------!
-      do k=1,nzg
-         cpoly%ntext_soil(k,isi) = work_v(ifm)%ntext(1,ipy)
-      end do
-      !------------------------------------------------------------------------------------!
-
-
-      !------------------------------------------------------------------------------------!
-      !     Use the polygon-level soil colour to populate the site-level.                  !
-      !------------------------------------------------------------------------------------!
-      cpoly%ncol_soil(isi) = work_v(ifm)%nscol(ipy)
-      !------------------------------------------------------------------------------------!
-   end do
-   !---------------------------------------------------------------------------------------!
-
-   return
-end subroutine soil_default_fill
-!==========================================================================================!
-!==========================================================================================!
 
 
 
@@ -305,6 +389,7 @@ end subroutine soil_default_fill
 ! bottleneck here. If the run is serial mynum=nnodetot, so I don't need to wait.           !
 !------------------------------------------------------------------------------------------!
 subroutine load_ecosystem_state()
+   use ed_inits
    use phenology_coms    , only : iphen_scheme    ! ! intent(in)
    use ed_misc_coms      , only : ied_init_mode   & ! intent(in)
                                 , ibigleaf        ! ! intent(in)
@@ -674,82 +759,3 @@ end subroutine sfcdata_ed
 
 
 
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine prints the soil properties for a single-polygon run.                 !
-!------------------------------------------------------------------------------------------!
-subroutine print_soil_info(cgrid,ifm)
-   use ed_state_vars  , only : edtype            & ! structure
-                             , polygontype       ! ! structure
-   use mem_polygons   , only : n_poi             ! ! intent(in)
-   use soil_coms      , only : isoilflg          & ! intent(in)
-                             , soil              & ! intent(in)
-                             , slxclay           & ! intent(in)
-                             , slxsand           ! ! intent(in)
-   use grid_coms      , only : nzg               ! ! intent(in)
-   use ed_misc_coms   , only : sfilout           ! ! intent(in)
-   use ed_max_dims    , only : str_len
-   implicit none
-
-   !----- Arguments. ----------------------------------------------------------------------!
-   type(edtype)          , target     :: cgrid
-   integer               , intent(in) :: ifm
-   !----- Local variables. ----------------------------------------------------------------!
-   type(polygontype)     , pointer    :: cpoly
-   character(len=str_len)             :: polyname
-   logical                            :: prescribed
-   integer                            :: nsoil
-   integer                            :: ipy
-   integer                            :: isi
-   integer                            :: slash
-   integer                            :: endstr
-   !---------------------------------------------------------------------------------------!
-   
-   if (ifm /=1 .or. n_poi /= 1 .or. cgrid%npolygons /= 1) return
-   ipy = 1
-   cpoly => cgrid%polygon(ipy)
-
-   !----- Find the polygon name. ----------------------------------------------------------!
-   slash    = index(sfilout,'/',back=.true.) + 1
-   endstr   = len_trim(sfilout)
-   polyname = sfilout(slash:endstr)
-
-   !----- Find whether the soil type characteristics were re-defined. ---------------------!
-   prescribed = isoilflg(ifm)==2 .and. slxclay > 0. .and. slxsand > 0. .and.               &
-                (slxclay + slxsand) <= 1.
-
-   write (unit=*,fmt='(a)')           ' '
-   write (unit=*,fmt='(a)') '   --------------------------------------------------------'
-   write (unit=*,fmt='(a)')           '    Soil information:'
-   write (unit=*,fmt='(a)')           ' '
-   write (unit=*,fmt='(a,1x,a)')      '    Polygon name               :',trim(polyname)
-   write (unit=*,fmt='(a,1x,f11.3)')  '    Longitude                  :',cgrid%lon(ipy)
-   write (unit=*,fmt='(a,1x,f11.3)')  '    Latitude                   :',cgrid%lat(ipy)
-   write (unit=*,fmt='(a,11x,l1)')    '    Prescribed sand and clay   :',prescribed
-   write (unit=*,fmt='(a,1x,i11)')    '    # of sites                 :',cpoly%nsites
-
-   do isi = 1,cpoly%nsites
-      nsoil = cpoly%ntext_soil(nzg,isi)
-      write (unit=*,fmt='(a)')          ' '
-      write (unit=*,fmt='(a,1x,i11)')   '    Site :',isi
-      write (unit=*,fmt='(a,1x,i10)')   '      - Type :',nsoil
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Clay fraction  =', soil(nsoil)%xclay
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Sand fraction  =', soil(nsoil)%xsand
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Silt fraction  =', soil(nsoil)%xsilt
-      write(unit=*,fmt='(a,1x,es12.5)') '      - SLBS           =', soil(nsoil)%slbs
-      write(unit=*,fmt='(a,1x,es12.5)') '      - SLPOTS         =', soil(nsoil)%slpots
-      write(unit=*,fmt='(a,1x,es12.5)') '      - SLCONS         =', soil(nsoil)%slcons
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Dry air soil   =', soil(nsoil)%soilcp
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Wilting point  =', soil(nsoil)%soilwp
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Field capacity =', soil(nsoil)%sfldcap
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Saturation     =', soil(nsoil)%slmsts
-      write(unit=*,fmt='(a,1x,es12.5)') '      - Heat capacity  =', soil(nsoil)%slcpd
-   end do
-   write (unit=*,fmt='(a)') '   --------------------------------------------------------'
-   write (unit=*,fmt='(a)') ' '
-
-
-   return
-end subroutine print_soil_info
-!==========================================================================================!
-!==========================================================================================!

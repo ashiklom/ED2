@@ -1,184 +1,5 @@
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine calculates the site-level variables based on the polygon-level ones. !
-! If needed, it will also apply the lapse rate on some variables, and recalculate the      !
-! others in order to keep satisfying the ideal gas law and some thermodynamic properties.  !
-!------------------------------------------------------------------------------------------!
-subroutine calc_met_lapse(cgrid,ipy)
-  
-   use ed_state_vars         , only : edtype      & ! structure
-                                    , polygontype ! ! structure
-   use consts_coms           , only : toodry,pi1      ! ! intent(in)
-   implicit none
-   !----- Arguments. ----------------------------------------------------------------------!
-   type(edtype)     , target     :: cgrid
-   integer          , intent(in) :: ipy
-   !----- Local variables -----------------------------------------------------------------!
-   type(polygontype), pointer    :: cpoly
-   integer                       :: isi
-   real                          :: ebar   !! mean elevation
-   real                          :: delE   !! deviation from mean elevation
-   real                          :: aterr  !! terrestrial area
-   real                          :: hillshade
-   !----- Local constants -----------------------------------------------------------------!
-   real             , parameter  :: offset=tiny(1.)/epsilon(1.) !! Tiny offset to avoid FPE
-   logical          , parameter  :: bypass=.true.
-   !---------------------------------------------------------------------------------------!
-
-   !----- Pass over sites once to calc preliminary stats. ---------------------------------!
-   cpoly => cgrid%polygon(ipy)
-
-   ebar = 0.0
-   aterr = 0.0
-
-   do isi=1,cpoly%nsites
-      ebar  = ebar + cpoly%area(isi)*cpoly%elevation(isi)
-      aterr = aterr + cpoly%area(isi)
-   end do
-   ebar = ebar/aterr
-
-   if (bypass) then
-      do isi = 1,cpoly%nsites
-         hillshade = sin(pi1*cpoly%slope(isi)/180.)/2.
-         cpoly%met(isi)%geoht       = cgrid%met(ipy)%geoht
-         cpoly%met(isi)%atm_tmp     = cgrid%met(ipy)%atm_tmp
-         cpoly%met(isi)%atm_shv     = cgrid%met(ipy)%atm_shv
-         cpoly%met(isi)%prss        = cgrid%met(ipy)%prss
-         cpoly%met(isi)%pcpg        = cgrid%met(ipy)%pcpg
-         cpoly%met(isi)%par_diffuse = cgrid%met(ipy)%par_diffuse*(1.0-hillshade)
-         cpoly%met(isi)%atm_co2     = cgrid%met(ipy)%atm_co2
-         cpoly%met(isi)%rlong       = cgrid%met(ipy)%rlong
-         cpoly%met(isi)%par_beam    = cgrid%met(ipy)%par_beam
-         cpoly%met(isi)%nir_diffuse = cgrid%met(ipy)%nir_diffuse*(1.0-hillshade)
-         cpoly%met(isi)%nir_beam    = cgrid%met(ipy)%nir_beam
-         cpoly%met(isi)%vels        = cgrid%met(ipy)%vels
-         cpoly%met(isi)%atm_ustar   = cgrid%met(ipy)%atm_ustar
-      end do
-   else
-      
-      !----- Second pass, calculate lapse rate adjustment. --------------------------------!
-      do isi = 1,cpoly%nsites
-         
-         delE = cpoly%elevation(isi) - ebar
-         
-         !----- Perform linear adjustments. -----------------------------------------------!
-         cpoly%met(isi)%geoht   = cgrid%met(ipy)%geoht   + cgrid%lapse(ipy)%geoht   * delE
-         cpoly%met(isi)%atm_tmp = cgrid%met(ipy)%atm_tmp + cgrid%lapse(ipy)%atm_tmp * delE
-         cpoly%met(isi)%atm_shv = max(toodry, cgrid%met(ipy)%atm_shv                       &
-                                            + cgrid%lapse(ipy)%atm_shv * delE)
-         cpoly%met(isi)%prss    = cgrid%met(ipy)%prss    + cgrid%lapse(ipy)%prss    * delE
-         cpoly%met(isi)%atm_co2 = cgrid%met(ipy)%atm_co2 + cgrid%lapse(ipy)%atm_co2 * delE
-         cpoly%met(isi)%rlong   = cgrid%met(ipy)%rlong   + cgrid%lapse(ipy)%rlong   * delE
-         cpoly%met(isi)%par_diffuse = (cgrid%met(ipy)%par_diffuse                           &
-                                    + cgrid%lapse(ipy)%par_diffuse * delE)*(1.0-hillshade)
-         cpoly%met(isi)%par_beam    = cgrid%met(ipy)%par_beam                              &
-                                    + cgrid%lapse(ipy)%par_beam * delE
-         cpoly%met(isi)%nir_diffuse = (cgrid%met(ipy)%nir_diffuse                           &
-                                    + cgrid%lapse(ipy)%nir_diffuse * delE)*(1.0-hillshade)
-         cpoly%met(isi)%nir_beam    = cgrid%met(ipy)%nir_beam                              &
-                                    + cgrid%lapse(ipy)%nir_beam * delE
-         !---------------------------------------------------------------------------------!
-         ! Note: at this point VELS is vel^2.  Thus this lapse preserves mean wind ENERGY  !
-         !       not wind SPEED.                                                           !
-         !---------------------------------------------------------------------------------!
-         cpoly%met(isi)%vels      = cgrid%met(ipy)%vels                                    &
-                                  + cgrid%lapse(ipy)%vels*delE
-         cpoly%met(isi)%atm_ustar = cgrid%met(ipy)%atm_ustar                               &
-                                  + cgrid%lapse(ipy)%atm_ustar*delE
-
-         !---------------------------------------------------------------------------------!
-         ! Note: Precipitation adjustment is based on proportional change rather than a    !
-         !       linear scaling.                                                           !
-         !---------------------------------------------------------------------------------!
-         cpoly%met(isi)%pcpg    = cgrid%met(ipy)%pcpg * cpoly%pptweight(isi)
-
-      end do
-   end if
-
-   !----- Check whether the radiation terms make sense... ---------------------------------!
-   call met_sanity_check(cgrid,ipy)
-
-   return
-end subroutine calc_met_lapse
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-!      Right now, this subroutine simply transfers lapse rates from ed_data.  In the       !
-! future, it could set parmameters based on spatial maps of parameters.                    !
-!------------------------------------------------------------------------------------------!
-subroutine setLapseParms(cgrid)
-   use ed_state_vars  , only : edtype      & ! structure
-                             , polygontype ! ! structure
-   use met_driver_coms, only : lapse       ! ! structure
-
-   implicit none
-   !----- Arguments. ----------------------------------------------------------------------!
-   type(edtype)     , target  :: cgrid
-   !----- Local variables. ----------------------------------------------------------------!
-   type(polygontype), pointer :: cpoly
-   real                       :: ebar
-   real                       :: aterr
-   integer                    :: ipy
-   integer                    :: isi
-   !---------------------------------------------------------------------------------------!
-
-  
-   do ipy = 1,cgrid%npolygons
-      
-      cgrid%lapse(ipy)%geoht       = lapse%geoht
-      cgrid%lapse(ipy)%vels        = lapse%vels
-      cgrid%lapse(ipy)%atm_ustar   = lapse%atm_ustar
-      cgrid%lapse(ipy)%atm_tmp     = lapse%atm_tmp
-      cgrid%lapse(ipy)%atm_shv     = lapse%atm_shv
-      cgrid%lapse(ipy)%prss        = lapse%prss
-      cgrid%lapse(ipy)%pcpg        = lapse%pcpg
-      cgrid%lapse(ipy)%atm_co2     = lapse%atm_co2
-      cgrid%lapse(ipy)%rlong       = lapse%rlong
-      cgrid%lapse(ipy)%nir_beam    = lapse%nir_beam
-      cgrid%lapse(ipy)%nir_diffuse = lapse%nir_diffuse
-      cgrid%lapse(ipy)%par_beam    = lapse%par_beam
-      cgrid%lapse(ipy)%par_diffuse = lapse%par_diffuse
-      cgrid%lapse(ipy)%pptnorm     = lapse%pptnorm
-
-      !----- Precipitation weight. --------------------------------------------------------!
-      cpoly => cgrid%polygon(ipy)
-      ebar  = 0.0
-      aterr = 0.0
-      do isi = 1,cpoly%nsites
-         ebar  = ebar  + cpoly%area(isi)*cpoly%elevation(isi)
-         aterr = aterr + cpoly%area(isi)
-      end do
-
-      ebar = ebar/aterr
-      do isi = 1,cpoly%nsites
-         if (cgrid%lapse(ipy)%pptnorm /= 0.) then
-            cpoly%pptweight(isi) = ( cgrid%lapse(ipy)%pptnorm                              &
-                                   + cgrid%lapse(ipy)%pcpg*(cpoly%elevation(isi) - ebar) ) &
-                                 / cgrid%lapse(ipy)%pptnorm
-         else
-            cpoly%pptweight(isi) = 1.0
-         end if
-      end do
-
-   end do
-
-   return
-end subroutine setLapseParms
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
+module mod_lapse
+contains
 !==========================================================================================!
 !==========================================================================================!
 !     This subroutine will check the meteorological drivers, and print some information    !
@@ -575,4 +396,187 @@ subroutine met_sanity_check(cgrid,ipy)
 end subroutine met_sanity_check
 !==========================================================================================!
 !==========================================================================================!
+
+end module mod_lapse
+!==========================================================================================!
+!==========================================================================================!
+!     This subroutine calculates the site-level variables based on the polygon-level ones. !
+! If needed, it will also apply the lapse rate on some variables, and recalculate the      !
+! others in order to keep satisfying the ideal gas law and some thermodynamic properties.  !
+!------------------------------------------------------------------------------------------!
+subroutine calc_met_lapse(cgrid,ipy)
+  
+   use mod_lapse
+   use ed_state_vars         , only : edtype      & ! structure
+                                    , polygontype ! ! structure
+   use consts_coms           , only : toodry,pi1      ! ! intent(in)
+   implicit none
+   !----- Arguments. ----------------------------------------------------------------------!
+   type(edtype)     , target     :: cgrid
+   integer          , intent(in) :: ipy
+   !----- Local variables -----------------------------------------------------------------!
+   type(polygontype), pointer    :: cpoly
+   integer                       :: isi
+   real                          :: ebar   !! mean elevation
+   real                          :: delE   !! deviation from mean elevation
+   real                          :: aterr  !! terrestrial area
+   real                          :: hillshade
+   !----- Local constants -----------------------------------------------------------------!
+   real             , parameter  :: offset=tiny(1.)/epsilon(1.) !! Tiny offset to avoid FPE
+   logical          , parameter  :: bypass=.true.
+   !---------------------------------------------------------------------------------------!
+
+   !----- Pass over sites once to calc preliminary stats. ---------------------------------!
+   cpoly => cgrid%polygon(ipy)
+
+   ebar = 0.0
+   aterr = 0.0
+
+   do isi=1,cpoly%nsites
+      ebar  = ebar + cpoly%area(isi)*cpoly%elevation(isi)
+      aterr = aterr + cpoly%area(isi)
+   end do
+   ebar = ebar/aterr
+
+   if (bypass) then
+      do isi = 1,cpoly%nsites
+         hillshade = sin(pi1*cpoly%slope(isi)/180.)/2.
+         cpoly%met(isi)%geoht       = cgrid%met(ipy)%geoht
+         cpoly%met(isi)%atm_tmp     = cgrid%met(ipy)%atm_tmp
+         cpoly%met(isi)%atm_shv     = cgrid%met(ipy)%atm_shv
+         cpoly%met(isi)%prss        = cgrid%met(ipy)%prss
+         cpoly%met(isi)%pcpg        = cgrid%met(ipy)%pcpg
+         cpoly%met(isi)%par_diffuse = cgrid%met(ipy)%par_diffuse*(1.0-hillshade)
+         cpoly%met(isi)%atm_co2     = cgrid%met(ipy)%atm_co2
+         cpoly%met(isi)%rlong       = cgrid%met(ipy)%rlong
+         cpoly%met(isi)%par_beam    = cgrid%met(ipy)%par_beam
+         cpoly%met(isi)%nir_diffuse = cgrid%met(ipy)%nir_diffuse*(1.0-hillshade)
+         cpoly%met(isi)%nir_beam    = cgrid%met(ipy)%nir_beam
+         cpoly%met(isi)%vels        = cgrid%met(ipy)%vels
+         cpoly%met(isi)%atm_ustar   = cgrid%met(ipy)%atm_ustar
+      end do
+   else
+      
+      !----- Second pass, calculate lapse rate adjustment. --------------------------------!
+      do isi = 1,cpoly%nsites
+         
+         delE = cpoly%elevation(isi) - ebar
+         
+         !----- Perform linear adjustments. -----------------------------------------------!
+         cpoly%met(isi)%geoht   = cgrid%met(ipy)%geoht   + cgrid%lapse(ipy)%geoht   * delE
+         cpoly%met(isi)%atm_tmp = cgrid%met(ipy)%atm_tmp + cgrid%lapse(ipy)%atm_tmp * delE
+         cpoly%met(isi)%atm_shv = max(toodry, cgrid%met(ipy)%atm_shv                       &
+                                            + cgrid%lapse(ipy)%atm_shv * delE)
+         cpoly%met(isi)%prss    = cgrid%met(ipy)%prss    + cgrid%lapse(ipy)%prss    * delE
+         cpoly%met(isi)%atm_co2 = cgrid%met(ipy)%atm_co2 + cgrid%lapse(ipy)%atm_co2 * delE
+         cpoly%met(isi)%rlong   = cgrid%met(ipy)%rlong   + cgrid%lapse(ipy)%rlong   * delE
+         cpoly%met(isi)%par_diffuse = (cgrid%met(ipy)%par_diffuse                           &
+                                    + cgrid%lapse(ipy)%par_diffuse * delE)*(1.0-hillshade)
+         cpoly%met(isi)%par_beam    = cgrid%met(ipy)%par_beam                              &
+                                    + cgrid%lapse(ipy)%par_beam * delE
+         cpoly%met(isi)%nir_diffuse = (cgrid%met(ipy)%nir_diffuse                           &
+                                    + cgrid%lapse(ipy)%nir_diffuse * delE)*(1.0-hillshade)
+         cpoly%met(isi)%nir_beam    = cgrid%met(ipy)%nir_beam                              &
+                                    + cgrid%lapse(ipy)%nir_beam * delE
+         !---------------------------------------------------------------------------------!
+         ! Note: at this point VELS is vel^2.  Thus this lapse preserves mean wind ENERGY  !
+         !       not wind SPEED.                                                           !
+         !---------------------------------------------------------------------------------!
+         cpoly%met(isi)%vels      = cgrid%met(ipy)%vels                                    &
+                                  + cgrid%lapse(ipy)%vels*delE
+         cpoly%met(isi)%atm_ustar = cgrid%met(ipy)%atm_ustar                               &
+                                  + cgrid%lapse(ipy)%atm_ustar*delE
+
+         !---------------------------------------------------------------------------------!
+         ! Note: Precipitation adjustment is based on proportional change rather than a    !
+         !       linear scaling.                                                           !
+         !---------------------------------------------------------------------------------!
+         cpoly%met(isi)%pcpg    = cgrid%met(ipy)%pcpg * cpoly%pptweight(isi)
+
+      end do
+   end if
+
+   !----- Check whether the radiation terms make sense... ---------------------------------!
+   call met_sanity_check(cgrid,ipy)
+
+   return
+end subroutine calc_met_lapse
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+!      Right now, this subroutine simply transfers lapse rates from ed_data.  In the       !
+! future, it could set parmameters based on spatial maps of parameters.                    !
+!------------------------------------------------------------------------------------------!
+subroutine setLapseParms(cgrid)
+   use ed_state_vars  , only : edtype      & ! structure
+                             , polygontype ! ! structure
+   use met_driver_coms, only : lapse       ! ! structure
+
+   implicit none
+   !----- Arguments. ----------------------------------------------------------------------!
+   type(edtype)     , target  :: cgrid
+   !----- Local variables. ----------------------------------------------------------------!
+   type(polygontype), pointer :: cpoly
+   real                       :: ebar
+   real                       :: aterr
+   integer                    :: ipy
+   integer                    :: isi
+   !---------------------------------------------------------------------------------------!
+
+  
+   do ipy = 1,cgrid%npolygons
+      
+      cgrid%lapse(ipy)%geoht       = lapse%geoht
+      cgrid%lapse(ipy)%vels        = lapse%vels
+      cgrid%lapse(ipy)%atm_ustar   = lapse%atm_ustar
+      cgrid%lapse(ipy)%atm_tmp     = lapse%atm_tmp
+      cgrid%lapse(ipy)%atm_shv     = lapse%atm_shv
+      cgrid%lapse(ipy)%prss        = lapse%prss
+      cgrid%lapse(ipy)%pcpg        = lapse%pcpg
+      cgrid%lapse(ipy)%atm_co2     = lapse%atm_co2
+      cgrid%lapse(ipy)%rlong       = lapse%rlong
+      cgrid%lapse(ipy)%nir_beam    = lapse%nir_beam
+      cgrid%lapse(ipy)%nir_diffuse = lapse%nir_diffuse
+      cgrid%lapse(ipy)%par_beam    = lapse%par_beam
+      cgrid%lapse(ipy)%par_diffuse = lapse%par_diffuse
+      cgrid%lapse(ipy)%pptnorm     = lapse%pptnorm
+
+      !----- Precipitation weight. --------------------------------------------------------!
+      cpoly => cgrid%polygon(ipy)
+      ebar  = 0.0
+      aterr = 0.0
+      do isi = 1,cpoly%nsites
+         ebar  = ebar  + cpoly%area(isi)*cpoly%elevation(isi)
+         aterr = aterr + cpoly%area(isi)
+      end do
+
+      ebar = ebar/aterr
+      do isi = 1,cpoly%nsites
+         if (cgrid%lapse(ipy)%pptnorm /= 0.) then
+            cpoly%pptweight(isi) = ( cgrid%lapse(ipy)%pptnorm                              &
+                                   + cgrid%lapse(ipy)%pcpg*(cpoly%elevation(isi) - ebar) ) &
+                                 / cgrid%lapse(ipy)%pptnorm
+         else
+            cpoly%pptweight(isi) = 1.0
+         end if
+      end do
+
+   end do
+
+   return
+end subroutine setLapseParms
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
 

@@ -1,159 +1,5 @@
-!==========================================================================================!
-!==========================================================================================!
-!    This subroutine controls the changes in leaf biomass due to phenology.                !
-!------------------------------------------------------------------------------------------!
-subroutine phenology_driver(cgrid, doy, month, tfact)
-   use ed_state_vars  , only : edtype                & ! structure
-                             , polygontype           & ! structure
-                             , sitetype              ! ! structure
-   use phenology_coms , only : iphen_scheme          ! ! intent(in)
-   use ed_misc_coms   , only : current_time          ! ! intent(in)
-   use phenology_aux  , only : prescribed_leaf_state & ! subroutine
-                             , update_thermal_sums   & ! subroutine
-                             , update_turnover       ! ! subroutine
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(edtype)      , target      :: cgrid
-   integer           , intent(in)  :: doy
-   integer           , intent(in)  :: month
-   real              , intent(in)  :: tfact
-   !----- Local variables -----------------------------------------------------------------!
-   type(polygontype) , pointer     :: cpoly
-   type(sitetype)    , pointer     :: csite
-   integer                         :: ipy
-   integer                         :: isi
-   integer                         :: ipa
-   !---------------------------------------------------------------------------------------!
-
-   do ipy = 1,cgrid%npolygons
-      cpoly => cgrid%polygon(ipy)
-
-      do isi = 1,cpoly%nsites
-         csite => cpoly%site(isi)
-
-         !---------------------------------------------------------------------------------!
-         !     Get the patch-level average daily temperature, which is needed for mortal-  !
-         ! ity, recruitment and some phenology schemes.                                    !
-         !---------------------------------------------------------------------------------!
-         do ipa = 1,csite%npatches
-            csite%avg_daily_temp(ipa) = csite%avg_daily_temp(ipa) * tfact
-         end do
-         
-         select case (iphen_scheme)
-         case (-1,0,2)
-            !------------------------------------------------------------------------------!
-            !     Default predictive scheme (Botta et al.) or the modified drought         !
-            ! deciduous phenology for broadleaf PFTs.                                      !
-            !------------------------------------------------------------------------------!
-            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
-            call update_phenology(doy,cpoly,isi,cgrid%lat(ipy))
-            
-         case (1)
-            !----- Use prescribed phenology. ----------------------------------------------!
-            call prescribed_leaf_state(cgrid%lat(ipy), current_time%month                  &
-                                      ,current_time%year, doy                              &
-                                      ,cpoly%green_leaf_factor(:,isi)                      &
-                                      ,cpoly%leaf_aging_factor(:,isi),cpoly%phen_pars(isi)) 
-            call update_phenology(doy,cpoly,isi,cgrid%lat(ipy))
-
-
-         case (3)
-            !----- KIM light-controlled predictive phenology scheme. ----------------------!
-            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
-            call update_turnover(cpoly,isi)
-            call update_phenology(doy,cpoly,isi,cgrid%lat(ipy))
-         end select
-      end do
-   end do
-
-   return
-end subroutine phenology_driver
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-!    This subroutine will compute only the parts of the phenology that don t change the    !
-! ecosystem state.                                                                         !
-!------------------------------------------------------------------------------------------!
-subroutine phenology_driver_eq_0(cgrid, doy, month, tfact)
-   use ed_state_vars  , only : edtype                & ! structure
-                             , polygontype           & ! structure
-                             , sitetype              ! ! structure
-   use phenology_coms , only : iphen_scheme          ! ! intent(in)
-   use ed_misc_coms   , only : current_time          ! ! intent(in)
-   use phenology_aux  , only : prescribed_leaf_state & ! subroutine
-                             , update_thermal_sums   & ! subroutine
-                             , update_turnover       ! ! subroutine
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(edtype)      , target      :: cgrid
-   integer           , intent(in)  :: doy
-   integer           , intent(in)  :: month
-   real              , intent(in)  :: tfact
-   !----- Local variables -----------------------------------------------------------------!
-   type(polygontype) , pointer     :: cpoly
-   type(sitetype)    , pointer     :: csite
-   integer                         :: ipy
-   integer                         :: isi
-   integer                         :: ipa
-   !---------------------------------------------------------------------------------------!
-
-   do ipy = 1,cgrid%npolygons
-      cpoly => cgrid%polygon(ipy)
-
-      do isi = 1,cpoly%nsites
-         csite => cpoly%site(isi)
-
-         !---------------------------------------------------------------------------------!
-         !     Get the patch-level average daily temperature, which is needed for mortal-  !
-         ! ity, recruitment and some phenology schemes.                                    !
-         !---------------------------------------------------------------------------------!
-         do ipa = 1,csite%npatches
-            csite%avg_daily_temp(ipa) = csite%avg_daily_temp(ipa) * tfact
-         end do
-         
-         select case (iphen_scheme)
-         case (-1,0,2)
-            !------------------------------------------------------------------------------!
-            !     Default predictive scheme (Botta et al.) or the modified drought         !
-            ! deciduous phenology for broadleaf PFTs.                                      !
-            !------------------------------------------------------------------------------!
-            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
-            call update_phenology_eq_0(doy,cpoly,isi,cgrid%lat(ipy))
-            
-         case (1)
-            !----- Use prescribed phenology. ----------------------------------------------!
-            call prescribed_leaf_state(cgrid%lat(ipy), current_time%month                  &
-                                      ,current_time%year, doy                              &
-                                      ,cpoly%green_leaf_factor(:,isi)                      &
-                                      ,cpoly%leaf_aging_factor(:,isi),cpoly%phen_pars(isi)) 
-            call update_phenology_eq_0(doy,cpoly,isi,cgrid%lat(ipy))
-
-         case (3)
-            !----- KIM light-controlled predictive phenology scheme. ----------------------!
-            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
-            call update_turnover(cpoly,isi)
-            call update_phenology_eq_0(doy,cpoly,isi,cgrid%lat(ipy))
-         end select
-      end do
-   end do
-
-   return
-end subroutine phenology_driver_eq_0
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
+module mod_phenology_driv
+contains
 !==========================================================================================!
 !==========================================================================================!
 subroutine update_phenology(doy, cpoly, isi, lat)
@@ -1019,6 +865,164 @@ subroutine update_phenology_eq_0(doy, cpoly, isi, lat)
    end do patchloop
    return
 end subroutine update_phenology_eq_0
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+end module mod_phenology_driv
+!==========================================================================================!
+!==========================================================================================!
+!    This subroutine controls the changes in leaf biomass due to phenology.                !
+!------------------------------------------------------------------------------------------!
+subroutine phenology_driver(cgrid, doy, month, tfact)
+   use mod_phenology_driv
+   use ed_state_vars  , only : edtype                & ! structure
+                             , polygontype           & ! structure
+                             , sitetype              ! ! structure
+   use phenology_coms , only : iphen_scheme          ! ! intent(in)
+   use ed_misc_coms   , only : current_time          ! ! intent(in)
+   use phenology_aux  , only : prescribed_leaf_state & ! subroutine
+                             , update_thermal_sums   & ! subroutine
+                             , update_turnover       ! ! subroutine
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(edtype)      , target      :: cgrid
+   integer           , intent(in)  :: doy
+   integer           , intent(in)  :: month
+   real              , intent(in)  :: tfact
+   !----- Local variables -----------------------------------------------------------------!
+   type(polygontype) , pointer     :: cpoly
+   type(sitetype)    , pointer     :: csite
+   integer                         :: ipy
+   integer                         :: isi
+   integer                         :: ipa
+   !---------------------------------------------------------------------------------------!
+
+   do ipy = 1,cgrid%npolygons
+      cpoly => cgrid%polygon(ipy)
+
+      do isi = 1,cpoly%nsites
+         csite => cpoly%site(isi)
+
+         !---------------------------------------------------------------------------------!
+         !     Get the patch-level average daily temperature, which is needed for mortal-  !
+         ! ity, recruitment and some phenology schemes.                                    !
+         !---------------------------------------------------------------------------------!
+         do ipa = 1,csite%npatches
+            csite%avg_daily_temp(ipa) = csite%avg_daily_temp(ipa) * tfact
+         end do
+         
+         select case (iphen_scheme)
+         case (-1,0,2)
+            !------------------------------------------------------------------------------!
+            !     Default predictive scheme (Botta et al.) or the modified drought         !
+            ! deciduous phenology for broadleaf PFTs.                                      !
+            !------------------------------------------------------------------------------!
+            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
+            call update_phenology(doy,cpoly,isi,cgrid%lat(ipy))
+            
+         case (1)
+            !----- Use prescribed phenology. ----------------------------------------------!
+            call prescribed_leaf_state(cgrid%lat(ipy), current_time%month                  &
+                                      ,current_time%year, doy                              &
+                                      ,cpoly%green_leaf_factor(:,isi)                      &
+                                      ,cpoly%leaf_aging_factor(:,isi),cpoly%phen_pars(isi)) 
+            call update_phenology(doy,cpoly,isi,cgrid%lat(ipy))
+
+
+         case (3)
+            !----- KIM light-controlled predictive phenology scheme. ----------------------!
+            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
+            call update_turnover(cpoly,isi)
+            call update_phenology(doy,cpoly,isi,cgrid%lat(ipy))
+         end select
+      end do
+   end do
+
+   return
+end subroutine phenology_driver
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+!    This subroutine will compute only the parts of the phenology that don t change the    !
+! ecosystem state.                                                                         !
+!------------------------------------------------------------------------------------------!
+subroutine phenology_driver_eq_0(cgrid, doy, month, tfact)
+   use ed_state_vars  , only : edtype                & ! structure
+                             , polygontype           & ! structure
+                             , sitetype              ! ! structure
+   use phenology_coms , only : iphen_scheme          ! ! intent(in)
+   use ed_misc_coms   , only : current_time          ! ! intent(in)
+   use phenology_aux  , only : prescribed_leaf_state & ! subroutine
+                             , update_thermal_sums   & ! subroutine
+                             , update_turnover       ! ! subroutine
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(edtype)      , target      :: cgrid
+   integer           , intent(in)  :: doy
+   integer           , intent(in)  :: month
+   real              , intent(in)  :: tfact
+   !----- Local variables -----------------------------------------------------------------!
+   type(polygontype) , pointer     :: cpoly
+   type(sitetype)    , pointer     :: csite
+   integer                         :: ipy
+   integer                         :: isi
+   integer                         :: ipa
+   !---------------------------------------------------------------------------------------!
+
+   do ipy = 1,cgrid%npolygons
+      cpoly => cgrid%polygon(ipy)
+
+      do isi = 1,cpoly%nsites
+         csite => cpoly%site(isi)
+
+         !---------------------------------------------------------------------------------!
+         !     Get the patch-level average daily temperature, which is needed for mortal-  !
+         ! ity, recruitment and some phenology schemes.                                    !
+         !---------------------------------------------------------------------------------!
+         do ipa = 1,csite%npatches
+            csite%avg_daily_temp(ipa) = csite%avg_daily_temp(ipa) * tfact
+         end do
+         
+         select case (iphen_scheme)
+         case (-1,0,2)
+            !------------------------------------------------------------------------------!
+            !     Default predictive scheme (Botta et al.) or the modified drought         !
+            ! deciduous phenology for broadleaf PFTs.                                      !
+            !------------------------------------------------------------------------------!
+            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
+            call update_phenology_eq_0(doy,cpoly,isi,cgrid%lat(ipy))
+            
+         case (1)
+            !----- Use prescribed phenology. ----------------------------------------------!
+            call prescribed_leaf_state(cgrid%lat(ipy), current_time%month                  &
+                                      ,current_time%year, doy                              &
+                                      ,cpoly%green_leaf_factor(:,isi)                      &
+                                      ,cpoly%leaf_aging_factor(:,isi),cpoly%phen_pars(isi)) 
+            call update_phenology_eq_0(doy,cpoly,isi,cgrid%lat(ipy))
+
+         case (3)
+            !----- KIM light-controlled predictive phenology scheme. ----------------------!
+            call update_thermal_sums(month, cpoly, isi, cgrid%lat(ipy))
+            call update_turnover(cpoly,isi)
+            call update_phenology_eq_0(doy,cpoly,isi,cgrid%lat(ipy))
+         end select
+      end do
+   end do
+
+   return
+end subroutine phenology_driver_eq_0
 !==========================================================================================!
 !==========================================================================================!
 
