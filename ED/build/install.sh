@@ -95,7 +95,7 @@ esac
 
 # Tag executables with a git version and branch name if possible.
 GIT_EXIST=`git rev-parse --is-inside-work-tree`
-if [ ${GIT_EXIST} == "true" -a ${USE_GIT} ]
+if [ ${GIT_EXIST} = "true" -a ${USE_GIT} = "true" ]
 then
    GIT_TAG=`git branch -v | awk '/\*/ {print "-" $2 "-" $3}'`
    GIT_TAG=`echo ${GIT_TAG} | tr -d '()/[]'`
