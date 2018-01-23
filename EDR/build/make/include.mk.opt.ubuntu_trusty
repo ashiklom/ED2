@@ -46,7 +46,7 @@ CMACH=PC_LINUX1
 
 F_COMP=mpif90
 
-F_OPTS= -g -fopenmp -O2
+F_OPTS= -g -fopenmp -O2 -ffree-form
 
 C_COMP=mpicc
 
