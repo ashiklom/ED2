@@ -46,7 +46,7 @@ CMACH=PC_LINUX1
 
 F_COMP=mpif90
 
-F_OPTS= -g -fopenmp -O0 -Wall -W -ffpe-trap=invalid,zero,overflow -Wconversion -fbounds-check -fbacktrace -fdump-core -ffree-form
+F_OPTS= -g -fopenmp -O0 -Wall -W -ffpe-trap=invalid,zero,overflow -Wconversion -fbounds-check -fbacktrace -fdump-core -ffree-form -ffree-line-length-none
 
 C_COMP=mpicc
 
