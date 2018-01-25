@@ -1,34 +1,445 @@
-module mod_init_full_history
-contains
+module ed_init_full_history
+  contains
+
+!==========================================================================================!
+!==========================================================================================!
+!     This subroutine will set a full history start for the simulation.  In a full history !
+! start (runtype = 'HISTORY'), we assumes that you are continuing with the exact same      !
+! configuration as a given model simulation that wrote the file in which you are using.    !
+! In this case, each node starts with a list of polygons, and searches the HDF history     !
+! file for these polygons.  It expects to find at least one polygon in the file within 250 !
+! meters of proximity (although it should be exactly at the same place).  If it does not   !
+! find this it stops.                                                                      !
+!     Assuming that it finds the polygons, the subroutine then fills each of these         !
+! polygons with data, and traverses the data hierarchical tree that roots from each        !
+! polygon, initializing the model to the exact same state as the end of the previous run.  !
+! A search based restart does not expect to find exact matches, and may not use all of the !
+! polygons in the file.  Nonetheless, it will traverse the tree from these polygons and    !
+! populate the model states with what is found in the files tree.                          !
+!------------------------------------------------------------------------------------------!
+subroutine init_full_history_restart()
+   use landuse_init_module
+   use ed_max_dims      , only : n_pft                 & ! intent(in)
+                               , str_len               ! ! intent(in)
+   use ed_misc_coms     , only : sfilin                & ! intent(in)
+                               , current_time          & ! intent(in)
+                               , max_poihist_dist      ! ! intent(in)
+   use ed_state_vars    , only : polygontype           & ! structure
+                               , sitetype              & ! structure
+                               , patchtype             & ! structure
+                               , edtype                & ! structure
+                               , edgrid_g              & ! structure
+                               , allocate_sitetype     & ! subroutine
+                               , allocate_patchtype    & ! subroutine
+                               , allocate_polygontype  ! ! subroutine
+   use soil_coms        , only : alloc_soilgrid        ! ! subroutine
+   use grid_coms        , only : ngrids                ! ! intent(in)
+   use phenology_startup, only : phenology_init        ! ! subroutine
+   use ed_node_coms     , only : mynum                 ! ! intent(in)
+   use hdf5
+   use hdf5_coms        , only : file_id               & ! intent(inout)
+                               , dset_id               & ! intent(inout)
+                               , dspace_id             & ! intent(inout)
+                               , globdims              & ! intent(inout)
+                               , chnkdims              & ! intent(inout)
+                               , chnkoffs              ! ! intent(inout)
+   implicit none
+   !------ Local variables. ---------------------------------------------------------------!
+   type(edtype)                        , pointer     :: cgrid
+   type(polygontype)                   , pointer     :: cpoly
+   type(sitetype)                      , pointer     :: csite
+   type(patchtype)                     , pointer     :: cpatch
+   character(len=3)                                  :: cgr
+   character(len=str_len)                            :: hnamel
+   integer               , dimension(:), allocatable :: pysi_n
+   integer               , dimension(:), allocatable :: pysi_id
+   integer               , dimension(:), allocatable :: sipa_n
+   integer               , dimension(:), allocatable :: sipa_id
+   integer               , dimension(:), allocatable :: paco_n
+   integer               , dimension(:), allocatable :: paco_id
+   integer                                           :: ngr
+   integer                                           :: ifpy
+   integer                                           :: ipy
+   integer                                           :: isi
+   integer                                           :: ipa
+   integer                                           :: py_index
+   integer                                           :: si_index
+   integer                                           :: pa_index
+   integer                                           :: hdferr
+   logical               , dimension(:), allocatable :: is_burnt
+   logical                                           :: exists
+   real                  , dimension(:), allocatable :: file_lats
+   real                  , dimension(:), allocatable :: file_lons
+   real                                              :: mindist
+   real                                              :: polydist
+   real(kind=8)                                      :: dbletime
+   !------ Local constants. ---------------------------------------------------------------!
+   character(len=1)                    , parameter   :: vnam = 'S'
+   !------ External functions. ------------------------------------------------------------!
+   real                                , external    :: dist_gc
+   !---------------------------------------------------------------------------------------!
+
+
+
+   write (unit=*,fmt='(a)') '-----------------------------------------------------'
+   write (unit=*,fmt='(a)') '  Loading Full State (HISTORY)'
+
+
+   !----- Open the HDF environment. -------------------------------------------------------!
+   call h5open_f(hdferr)
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !---------------------------------------------------------------------------------------!
+   !     Turn off automatic error printing.  This is done because there may be datasets    !
+   ! that are not in the file, but it is OK.  If data that should be there are missing,    !
+   ! ED2 error reporting will detect it.  If something that can't be found is missing, the !
+   ! following call can be bypassed.  Note that automatic error reporting is turned back   !
+   ! on in the end.                                                                        !
+   !---------------------------------------------------------------------------------------!
+   call h5eset_auto_f(0,hdferr)
+
+
+   gridloop: do ngr=1,ngrids
+      cgrid => edgrid_g(ngr)
+
+      !------------------------------------------------------------------------------------!
+      !     Make the history file name.                                                    !
+      !------------------------------------------------------------------------------------!
+      write(cgr,'(a1,i2.2)') 'g',ngr
+
+      dbletime = dble(current_time%time)
+
+      call makefnam(hnamel,sfilin(1),dbletime,current_time%year,current_time%month         &
+                   ,current_time%date,0,vnam,cgr,'h5 ')
+      inquire(file=trim(hnamel),exist=exists)
+
+      if (.not.exists) then
+         !----- History couldn't be found.  Stop the run. ---------------------------------!
+         call fatal_error ('File '//trim(hnamel)//' not found.'                            &
+                          ,'init_full_history_restart','ed_init_full_history.F90')
+      else
+         call h5fopen_f(hnamel, H5F_ACC_RDONLY_F, file_id, hdferr)
+         if (hdferr < 0) then
+            write(unit=*,fmt='(a,1x,i8)') 'Error opening HDF5 file - error - ',hdferr
+            write(unit=*,fmt='(a,1x,a)' ) '- Filename: ',trim(hnamel)
+            call fatal_error('Error opening HDF5 file - error - '//trim(hnamel)            &
+                            ,'init_full_history_restart','ed_init_full_history.F90')
+         end if
+      end if
+
+
+      !------------------------------------------------------------------------------------!
+      !     Retrieve global vector sizes.                                                  !
+      !------------------------------------------------------------------------------------!
+      globdims    = 0_8
+      chnkdims    = 0_8
+      chnkoffs    = 0_8
+      globdims(1) = 1_8
+
+      call h5dopen_f(file_id,'NPOLYGONS_GLOBAL', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%npolygons_global,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      call h5dopen_f(file_id,'NSITES_GLOBAL', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%nsites_global,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      call h5dopen_f(file_id,'NPATCHES_GLOBAL', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%npatches_global,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      call h5dopen_f(file_id,'NCOHORTS_GLOBAL', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%ncohorts_global,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+      !------------------------------------------------------------------------------------!
+
+
+
+      !------------------------------------------------------------------------------------!
+      !     Retrieve the mapping of the data tree.                                         !
+      !------------------------------------------------------------------------------------!
+      globdims    = 0_8
+      globdims(1) = int(cgrid%npolygons_global,8)
+
+      allocate(pysi_n(cgrid%npolygons_global))
+      allocate(pysi_id(cgrid%npolygons_global))
+
+      call h5dopen_f(file_id,'PYSI_N', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,pysi_n,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      call h5dopen_f(file_id,'PYSI_ID', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,pysi_id,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      globdims(1) = int(cgrid%nsites_global,8)
+
+      allocate(sipa_n(cgrid%nsites_global))
+      allocate(sipa_id(cgrid%nsites_global))
+
+      call h5dopen_f(file_id,'SIPA_N', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,sipa_n,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      call h5dopen_f(file_id,'SIPA_ID', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,sipa_id,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      globdims(1) = int(cgrid%npatches_global,8)
+
+      allocate(paco_n(cgrid%npatches_global))
+      allocate(paco_id(cgrid%npatches_global))
+
+      call h5dopen_f(file_id,'PACO_N', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,paco_n,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      call h5dopen_f(file_id,'PACO_ID', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,paco_id,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+      !------------------------------------------------------------------------------------!
+
+
+      !------------------------------------------------------------------------------------!
+      !      Retrieve the polygon coordinates data.                                        !
+      !------------------------------------------------------------------------------------!
+      globdims(1) = int(cgrid%npolygons_global,8)
+      allocate(file_lats(cgrid%npolygons_global))
+      allocate(file_lons(cgrid%npolygons_global))
+
+      call h5dopen_f(file_id,'LATITUDE', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL,file_lats,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+      call h5dopen_f(file_id,'LONGITUDE', dset_id, hdferr)
+      call h5dget_space_f(dset_id, dspace_id, hdferr)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL,file_lons,globdims, hdferr)
+      call h5sclose_f(dspace_id, hdferr)
+      call h5dclose_f(dset_id, hdferr)
+
+
+
+      !------------------------------------------------------------------------------------!
+      !     Loop the polygons in the model state and match them with those in the file.    !
+      ! After the match, we must walk through the data from that polygon and initialize.   !
+      ! We check the distance between the expected coordinates and the retrieved ones, and !
+      ! they ought to be less than 250 metres apart, otherwise we can't use the polygon.   !
+      !------------------------------------------------------------------------------------!
+      polyloop: do ipy = 1,cgrid%npolygons
+         cpoly => cgrid%polygon(ipy)
+
+         py_index   = 0
+         mindist    = huge(1.)
+         do ifpy = 1,cgrid%npolygons_global
+            polydist = dist_gc(file_lons(ifpy),cgrid%lon(ipy)                              &
+                              ,file_lats(ifpy),cgrid%lat(ipy))
+            if (polydist < mindist) then
+               mindist    = polydist
+               py_index   = ifpy
+            end if
+         end do
+
+         !---------------------------------------------------------------------------------!
+         !     Check whether the closest polygon is close.                                 !
+         !---------------------------------------------------------------------------------!
+         if (mindist > max_poihist_dist) then
+            write (unit=*,fmt='(a)'          ) '------------------------------------------'
+            write (unit=*,fmt='(a)'          ) ' None of the polygons in the history file'
+            write (unit=*,fmt='(a)'          ) '    is enough close!  The model will stop!'
+            write (unit=*,fmt='(a)'          ) ' ED Polygon:'
+            write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',ipy
+            write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',cgrid%lon(ipy)
+            write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',cgrid%lat(ipy)
+            write (unit=*,fmt='(a)'          ) ' History file''s closest polygon:'
+            write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',py_index
+            write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',file_lons(py_index)
+            write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',file_lats(py_index)
+            write (unit=*,fmt='(a)'          ) '------------------------------------------'
+
+            call fatal_error('Mismatch between polygon and dataset'                        &
+                            ,'init_full_history_restart','ed_init_full_history.F90')
+         end if
+         !---------------------------------------------------------------------------------!
+
+         !---------------------------------------------------------------------------------!
+         !      Get all necessary polygon variables associated with this index for the     !
+         ! current polygon.                                                                !
+         !---------------------------------------------------------------------------------!
+         call fill_history_grid(cgrid,ipy,py_index)
+
+         if (pysi_n(py_index) > 0) then
+            !----- Allocate the polygontype structure (site level). -----------------------!
+            call allocate_polygontype(cpoly,pysi_n(py_index))
+            !------------------------------------------------------------------------------!
+
+
+
+            !------------------------------------------------------------------------------!
+            !     Get all necessary site variables associated with this index for the      !
+            ! current polygon.                                                             !
+            !------------------------------------------------------------------------------!
+            allocate (is_burnt(pysi_n(py_index)))
+            is_burnt(:) = .false.
+            call fill_history_polygon(cpoly,pysi_id(py_index),cgrid%nsites_global          &
+                                     ,pysi_n(py_index),is_burnt)
+
+            siteloop: do isi = 1,cpoly%nsites
+               csite => cpoly%site(isi)
+
+               !------ Calculate the index of this site's data in the HDF. ----------------!
+               si_index = pysi_id(py_index) + isi - 1
+
+               if (sipa_n(si_index) > 0) then
+                  !----- Allocate the sitetype structure (patch level). -------------------!
+                  call allocate_sitetype(csite,sipa_n(si_index))
+
+                  !------------------------------------------------------------------------!
+                  !     Get all necessary site variables associated with this index for    !
+                  ! the current site.                                                      !
+                  !------------------------------------------------------------------------!
+                  call fill_history_site(csite,sipa_id(si_index),cgrid%npatches_global     &
+                                        ,is_burnt(isi))
+
+                  patchloop: do ipa = 1,csite%npatches
+                     cpatch => csite%patch(ipa)
+                     pa_index = sipa_id(si_index) + ipa - 1
+
+                     if (paco_n(pa_index) > 0) then
+                        !----- Allocate the patchtype structure (cohort level). -----------!
+                        call allocate_patchtype(cpatch,paco_n(pa_index))
+
+                        !------------------------------------------------------------------!
+                        !     Get all necessary site variables associated with this index  !
+                        ! for the current patch.                                           !
+                        !------------------------------------------------------------------!
+                        call fill_history_patch(cpatch,paco_id(pa_index)                   &
+                                               ,cgrid%ncohorts_global)
+                        !------------------------------------------------------------------!
+                     else
+                        cpatch%ncohorts = 0
+                     endif
+                  end do patchloop
+               else
+                  write (unit=*,fmt='(a)'          ) '------------------------------------'
+                  write (unit=*,fmt='(a)'          ) ' Found a site with no patches.'
+                  write (unit=*,fmt='(a)'          ) ' This is not allowed.'
+                  write (unit=*,fmt='(a)'          ) ' ED Polygon and Site:'
+                  write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',ipy
+                  write (unit=*,fmt='(a,1x,i8)'    ) ' - Site      :',isi
+                  write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',cgrid%lon(ipy)
+                  write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',cgrid%lat(ipy)
+                  write (unit=*,fmt='(a)'          ) '------------------------------------'
+                  call fatal_error('Attempted to load an empty site.'                      &
+                                  ,'init_full_history_restart','ed_init_full_history.F90')
+               end if
+
+            end do siteloop
+            deallocate (is_burnt)
+
+         else
+            write (unit=*,fmt='(a)'          ) '------------------------------------'
+            write (unit=*,fmt='(a)'          ) ' Found a polygon with no sites.'
+            write (unit=*,fmt='(a)'          ) ' This is not allowed.'
+            write (unit=*,fmt='(a)'          ) ' ED Polygon:'
+            write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',ipy
+            write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',cgrid%lon(ipy)
+            write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',cgrid%lat(ipy)
+            write (unit=*,fmt='(a)'          ) '------------------------------------'
+            call fatal_error('Attempted to load an empty polygon.'                         &
+                            ,'init_full_history_restart','ed_init_full_history.F90')
+         end if
+      end do polyloop
+
+
+      call h5fclose_f(file_id, hdferr)
+      if (hdferr /= 0) then
+          print*,hdferr
+          call fatal_error('Could not close the HDF file'                                  &
+                          ,'init_full_history_restart','ed_init_full_history.F90')
+
+      end if
+
+      deallocate(file_lats)
+      deallocate(file_lons)
+      deallocate(paco_n)
+      deallocate(paco_id)
+      deallocate(sipa_n)
+      deallocate(sipa_id)
+      deallocate(pysi_n)
+      deallocate(pysi_id)
+
+   end do gridloop
+
+   !---------------------------------------------------------------------------------------!
+   !     Turn automatic error reporting back on.  This is probably unnecessary, because    !
+   ! the environment is about to be flushed.                                               !
+   !---------------------------------------------------------------------------------------!
+   call h5eset_auto_f(1,hdferr)
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !----- Close the HDF environment. ------------------------------------------------------!
+   call h5close_f(hdferr)
+   !---------------------------------------------------------------------------------------!
+
+
+
+   !----- Load the anthropogenic disturbance (or set them all to zero). -------------------!
+   write(unit=*,fmt='(a,i2.2)') ' Checking anthropogenic disturbance.  Node: ',mynum
+   call landuse_init()
+   !---------------------------------------------------------------------------------------!
+
+
+   !----- Load phenology in case it is prescribed (or set them with defaults). ------------!
+   write(unit=*,fmt='(a,i2.2)') ' Checking prescribed phenology.  Node: ',mynum
+   call phenology_init()
+
+   return
+end subroutine init_full_history_restart
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
 !==========================================================================================!
 !==========================================================================================!
 subroutine fill_history_grid(cgrid,ipy,py_index)
    use ed_state_vars, only : edtype        & ! structure
                            , polygontype   ! ! structure
-   use grid_coms    , only : nzg           ! ! intent(in)
    use ed_max_dims  , only : n_pft         & ! intent(in)
                            , n_dbh         & ! intent(in)
                            , n_age         & ! intent(in)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
-                           , chnkdims      & ! intent(inout)
-                           , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
-                           , memdims       & ! intent(inout)
-                           , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
-   use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
-                           , writing_dcyc  ! ! intent(in)
    implicit none
    !---------------------------------------------------------------------------------------!
 
@@ -70,75 +481,21 @@ end subroutine fill_history_grid
 subroutine fill_history_grid_p11(cgrid,ipy,py_index)
    use ed_state_vars, only : edtype        & ! structure
                            , polygontype   ! ! structure
-   use grid_coms    , only : nzg           ! ! intent(in)
    use ed_max_dims  , only : n_pft         & ! intent(in)
                            , n_dbh         & ! intent(in)
                            , n_age         & ! intent(in)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
-   use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
-                           , writing_dcyc  ! ! intent(in)
+                           , memsize       ! ! intent(inout)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
 
@@ -157,7 +514,7 @@ subroutine fill_history_grid_p11(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -310,75 +667,22 @@ end subroutine fill_history_grid_p11
 subroutine fill_history_grid_p11dmean(cgrid,ipy,py_index)
    use ed_state_vars, only : edtype        & ! structure
                            , polygontype   ! ! structure
-   use grid_coms    , only : nzg           ! ! intent(in)
    use ed_max_dims  , only : n_pft         & ! intent(in)
                            , n_dbh         & ! intent(in)
                            , n_age         & ! intent(in)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
-   use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
-                           , writing_dcyc  ! ! intent(in)
+                           , memsize       ! ! intent(inout)
+   use ed_misc_coms , only : writing_long  ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
 
@@ -397,7 +701,7 @@ subroutine fill_history_grid_p11dmean(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -729,75 +1033,22 @@ end subroutine fill_history_grid_p11dmean
 subroutine fill_history_grid_p11mmean(cgrid,ipy,py_index)
    use ed_state_vars, only : edtype        & ! structure
                            , polygontype   ! ! structure
-   use grid_coms    , only : nzg           ! ! intent(in)
    use ed_max_dims  , only : n_pft         & ! intent(in)
                            , n_dbh         & ! intent(in)
                            , n_age         & ! intent(in)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
-   use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
-                           , writing_dcyc  ! ! intent(in)
+                           , memsize       ! ! intent(inout)
+   use ed_misc_coms , only : writing_eorq  ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
 
@@ -816,7 +1067,7 @@ subroutine fill_history_grid_p11mmean(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -1234,69 +1485,21 @@ subroutine fill_history_grid_p12(cgrid,ipy,py_index)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
-   use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
-                           , writing_dcyc  ! ! intent(in)
+                           , memsize       ! ! intent(inout)
+   use ed_misc_coms , only : writing_long  & ! intent(in)
+                           , writing_eorq  ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
+
+
+
 
 
    !----- Arguments. ----------------------------------------------------------------------!
@@ -1314,7 +1517,7 @@ subroutine fill_history_grid_p12(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -1420,75 +1623,23 @@ end subroutine fill_history_grid_p12
 subroutine fill_history_grid_m11(cgrid,ipy,py_index)
    use ed_state_vars, only : edtype        & ! structure
                            , polygontype   ! ! structure
-   use grid_coms    , only : nzg           ! ! intent(in)
    use ed_max_dims  , only : n_pft         & ! intent(in)
                            , n_dbh         & ! intent(in)
                            , n_age         & ! intent(in)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
+                           , memsize       ! ! intent(inout)
    use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
                            , writing_dcyc  ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
 
@@ -1507,7 +1658,7 @@ subroutine fill_history_grid_m11(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -1868,75 +2019,21 @@ end subroutine fill_history_grid_m11
 subroutine fill_history_grid_p19(cgrid,ipy,py_index)
    use ed_state_vars, only : edtype        & ! structure
                            , polygontype   ! ! structure
-   use grid_coms    , only : nzg           ! ! intent(in)
    use ed_max_dims  , only : n_pft         & ! intent(in)
                            , n_dbh         & ! intent(in)
                            , n_age         & ! intent(in)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
-   use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
-                           , writing_dcyc  ! ! intent(in)
+                           , memsize       ! ! intent(inout)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
 
@@ -1955,7 +2052,7 @@ subroutine fill_history_grid_p19(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -2035,68 +2132,17 @@ subroutine fill_history_grid_m12(cgrid,ipy,py_index)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
+                           , memsize       ! ! intent(inout)
    use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
                            , writing_dcyc  ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
 
@@ -2115,7 +2161,7 @@ subroutine fill_history_grid_m12(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -2208,75 +2254,22 @@ end subroutine fill_history_grid_m12
 subroutine fill_history_grid_p146(cgrid,ipy,py_index)
    use ed_state_vars, only : edtype        & ! structure
                            , polygontype   ! ! structure
-   use grid_coms    , only : nzg           ! ! intent(in)
    use ed_max_dims  , only : n_pft         & ! intent(in)
                            , n_dbh         & ! intent(in)
                            , n_age         & ! intent(in)
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
-   use ed_misc_coms , only : ndcycle       & ! intent(in)
-                           , writing_long  & ! intent(in)
-                           , writing_eorq  & ! intent(in)
-                           , writing_dcyc  ! ! intent(in)
+                           , memsize       ! ! intent(inout)
+   use ed_misc_coms , only : writing_eorq  ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
 
@@ -2295,7 +2288,7 @@ subroutine fill_history_grid_p146(cgrid,ipy,py_index)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -2448,68 +2441,19 @@ subroutine fill_history_polygon(cpoly,pysi_index,nsites_global,nsites_now,is_bur
                            , max_site      & ! intent(in)
                            , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms    , only : file_id       & ! intent(inout)
-                           , dset_id       & ! intent(inout)
-                           , dspace_id     & ! intent(inout)
-                           , plist_id      & ! intent(inout)
-                           , globdims      & ! intent(inout)
+   use hdf5_coms    , only : globdims      & ! intent(inout)
                            , chnkdims      & ! intent(inout)
                            , chnkoffs      & ! intent(inout)
-                           , cnt           & ! intent(inout)
-                           , stride        & ! intent(inout)
                            , memdims       & ! intent(inout)
                            , memoffs       & ! intent(inout)
-                           , memsize       & ! intent(inout)
-                           , datatype_id   ! ! intent(inout)
+                           , memsize       ! ! intent(inout)
    use ed_misc_coms , only : ndcycle       & ! intent(in)
                            , writing_long  & ! intent(in)
                            , writing_eorq  & ! intent(in)
                            , writing_dcyc  ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
    !----- Arguments. ----------------------------------------------------------------------!
@@ -2538,7 +2482,7 @@ subroutine fill_history_polygon(cpoly,pysi_index,nsites_global,nsites_now,is_bur
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -3170,20 +3114,12 @@ subroutine fill_history_site(csite,sipa_index,npatches_global,is_burnt)
                                  , max_site      & ! intent(in)
                                  , n_dist_types  ! ! intent(in)
    use hdf5
-   use hdf5_coms          , only : file_id       & ! intent(inout)
-                                 , dset_id       & ! intent(inout)
-                                 , dspace_id     & ! intent(inout)
-                                 , plist_id      & ! intent(inout)
-                                 , globdims      & ! intent(inout)
+   use hdf5_coms          , only : globdims      & ! intent(inout)
                                  , chnkdims      & ! intent(inout)
                                  , chnkoffs      & ! intent(inout)
-                                 , cnt           & ! intent(inout)
-                                 , stride        & ! intent(inout)
                                  , memdims       & ! intent(inout)
                                  , memoffs       & ! intent(inout)
-                                 , memsize       & ! intent(inout)
-                                 , datatype_id   & ! intent(inout)
-                                 , setsize       ! ! intent(inout)
+                                 , memsize       ! ! intent(inout)
    use ed_misc_coms       , only : ndcycle       & ! intent(in)
                                  , writing_long  & ! intent(in)
                                  , writing_eorq  & ! intent(in)
@@ -3191,49 +3127,7 @@ subroutine fill_history_site(csite,sipa_index,npatches_global,is_burnt)
    use fusion_fission_coms, only : ff_nhgt       ! ! intent(in)
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
    !----- Arguments. ----------------------------------------------------------------------!
@@ -3255,7 +3149,7 @@ subroutine fill_history_site(csite,sipa_index,npatches_global,is_burnt)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -3860,7 +3754,7 @@ subroutine fill_history_site(csite,sipa_index,npatches_global,is_burnt)
                         ,'MMSQU_SENSIBLE_GC_PA      ',dsetrank,iparallel,.false.,foundvar)
       call hdf_getslab_r(csite%mmsqu_sensible_ac                                           &
                         ,'MMSQU_SENSIBLE_AC_PA      ',dsetrank,iparallel,.false.,foundvar)
-   end if                                                                           
+   end if
    !---------------------------------------------------------------------------------------!
    !---------------------------------------------------------------------------------------!
    !---------------------------------------------------------------------------------------!
@@ -4325,79 +4219,25 @@ end subroutine fill_history_site
 !------------------------------------------------------------------------------------------!
 subroutine fill_history_patch(cpatch,paco_index,ncohorts_global)
    use ed_state_vars      , only : patchtype     ! ! structure
-   use grid_coms          , only : nzg           & ! intent(in)
-                                 , nzs           ! ! intent(in)
    use ed_max_dims        , only : n_pft         & ! intent(in)
                                  , n_mort        & ! intent(in)
                                  , max_site      & ! intent(in)
                                  , n_dist_types  & ! intent(in)
                                  , n_radprof     ! ! intent(in)
    use hdf5
-   use hdf5_coms          , only : file_id       & ! intent(inout)
-                                 , dset_id       & ! intent(inout)
-                                 , dspace_id     & ! intent(inout)
-                                 , plist_id      & ! intent(inout)
-                                 , globdims      & ! intent(inout)
+   use hdf5_coms          , only : globdims      & ! intent(inout)
                                  , chnkdims      & ! intent(inout)
                                  , chnkoffs      & ! intent(inout)
-                                 , cnt           & ! intent(inout)
-                                 , stride        & ! intent(inout)
                                  , memdims       & ! intent(inout)
                                  , memoffs       & ! intent(inout)
-                                 , memsize       & ! intent(inout)
-                                 , datatype_id   & ! intent(inout)
-                                 , setsize       ! ! intent(inout)
+                                 , memsize       ! ! intent(inout)
    use ed_misc_coms       , only : ndcycle       & ! intent(in)
                                  , writing_long  & ! intent(in)
                                  , writing_eorq  & ! intent(in)
                                  , writing_dcyc  ! ! intent(in)
-   use fusion_fission_coms, only : ff_nhgt       ! ! intent(in)
-   use allometry          , only : dbh2ca        ! ! function
    implicit none
    !----- Interfaces. ---------------------------------------------------------------------!
-#if USE_INTERF
-   interface
-      subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=4)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_r
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_d
-      !------------------------------------------------------------------------------------!
-      subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-         use hdf5_coms, only : memsize ! ! intent(in)
-         !----- Arguments. ----------------------------------------------------------------!
-         integer         , dimension(memsize(1),memsize(2),memsize(3),memsize(4))          &
-                                                          , intent(inout) :: buff
-         character(len=*)                                 , intent(in)    :: varn
-         integer                                          , intent(in)    :: dsetrank
-         integer                                          , intent(in)    :: iparallel
-         logical                                          , intent(in)    :: required
-         logical                                          , intent(out)   :: foundvar
-         !---------------------------------------------------------------------------------!
-      end subroutine hdf_getslab_i
-      !------------------------------------------------------------------------------------!
-   end interface
-#endif
+
    !---------------------------------------------------------------------------------------!
 
    !----- Arguments. ----------------------------------------------------------------------!
@@ -4422,7 +4262,7 @@ subroutine fill_history_patch(cpatch,paco_index,ncohorts_global)
    !----- Turn off parallel for this sub-routine. -----------------------------------------!
    iparallel = 0
    !---------------------------------------------------------------------------------------!
- 
+
 
    !---------------------------------------------------------------------------------------!
    !     Reset the dimension arrays.                                                       !
@@ -5056,7 +4896,7 @@ subroutine fill_history_patch(cpatch,paco_index,ncohorts_global)
    !---------------------------------------------------------------------------------------!
    !---------------------------------------------------------------------------------------!
    !---------------------------------------------------------------------------------------!
-  
+
 
 
 
@@ -5108,7 +4948,7 @@ subroutine fill_history_patch(cpatch,paco_index,ncohorts_global)
    memdims (1) = int(n_mort,8)
    memsize (1) = int(n_mort,8)
    memoffs (1) = 0_8
-   
+
    globdims(2) = int(ncohorts_global,8)
    chnkdims(2) = int(cpatch%ncohorts,8)
    chnkoffs(2) = int(paco_index - 1,8)
@@ -5142,7 +4982,7 @@ subroutine fill_history_patch(cpatch,paco_index,ncohorts_global)
    memdims (1) = int(n_radprof,8)
    memsize (1) = int(n_radprof,8)
    memoffs (1) = 0_8
-   
+
    globdims(2) = int(ncohorts_global,8)
    chnkdims(2) = int(cpatch%ncohorts,8)
    chnkoffs(2) = int(paco_index - 1,8)
@@ -5397,19 +5237,16 @@ end subroutine fill_history_patch
 ! FOUNDVAR  -- Output flag that tells whether the variable was found or not.               !
 !------------------------------------------------------------------------------------------!
 subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
-   
+
    use hdf5
    use hdf5_coms, only : file_id      & ! intent(inout)
                        , dset_id      & ! intent(inout)
-                       , dspace_id    & ! intent(inout)
                        , plist_id     & ! intent(inout)
                        , filespace    & ! intent(inout)
                        , memspace     & ! intent(inout)
                        , globdims     & ! intent(inout)
                        , chnkdims     & ! intent(inout)
                        , chnkoffs     & ! intent(inout)
-                       , cnt          & ! intent(inout)
-                       , stride       & ! intent(inout)
                        , memdims      & ! intent(inout)
                        , memoffs      & ! intent(inout)
                        , memsize        ! intent(inout)
@@ -5474,7 +5311,7 @@ subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
       write (unit=*,fmt='(a)') '----------------------------------------------------------'
       write (unit=*,fmt='(a)') ''
       end if
-      
+
       buff(:,:,:,:) = 0.
       return
       !------------------------------------------------------------------------------------!
@@ -5489,14 +5326,14 @@ subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
          call fatal_error('Could not get the hyperslabs filespace for '//trim(varn)//'!'   &
               ,'hdf_getslab_r','ed_init_full_history.F90')
       end if
-      
+
       call h5sselect_hyperslab_f(filespace,H5S_SELECT_SET_F,chnkoffs, &
            chnkdims,hdferr)
       if (hdferr /= 0) then
          call fatal_error('Couldn''t assign the hyperslab filespace for '//trim(varn)//'!' &
               ,'hdf_getslab_r','ed_init_full_history.F90')
       end if
-      
+
       call h5screate_simple_f(dsetrank,memsize,memspace,hdferr)
       if (hdferr /= 0) then
          write(unit=*,fmt=*) 'Chnkdims = ',chnkdims
@@ -5504,20 +5341,20 @@ subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
          call fatal_error('Couldn''t create the hyperslab memspace for '//trim(varn)//'!'  &
                          ,'hdf_getslab_r','ed_init_full_history.F90')
       end if
-      
+
       call h5sselect_hyperslab_f(memspace,H5S_SELECT_SET_F,memoffs, &
            memdims,hdferr)
       if (hdferr /= 0) then
          call fatal_error('Couldn''t assign the hyperslab filespace for '//trim(varn)//'!' &
               ,'hdf_getslab_r','ed_init_full_history.F90')
       end if
-      
+
       if (iparallel == 1) then
-         
+
          call h5dread_f(dset_id, H5T_NATIVE_REAL,buff,globdims, hdferr, &
               mem_space_id = memspace, file_space_id = filespace, &
               xfer_prp = plist_id)
-         
+
          if (hdferr /= 0) then
             call fatal_error('Couldn''t read in hyperslab dataset for '//trim(varn)//'!'   &
                  ,'hdf_getslab_r','ed_init_full_history.F90')
@@ -5534,13 +5371,13 @@ subroutine hdf_getslab_r(buff,varn,dsetrank,iparallel,required,foundvar)
          end if
 
       end if
-      
+
       !  write(unit=*,fmt='(a)') 'History start: Loading '//trim(varn)//'...'
-      
+
       call h5sclose_f(filespace, hdferr)
       call h5sclose_f(memspace , hdferr)
       call h5dclose_f(dset_id  , hdferr)
-      
+
    end if
    return
 end subroutine hdf_getslab_r
@@ -5567,25 +5404,22 @@ end subroutine hdf_getslab_r
 ! FOUNDVAR  -- Output flag that tells whether the variable was found or not.               !
 !------------------------------------------------------------------------------------------!
 subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
-   
+
    use hdf5
    use hdf5_coms, only : file_id      & ! intent(inout)
                        , dset_id      & ! intent(inout)
-                       , dspace_id    & ! intent(inout)
                        , plist_id     & ! intent(inout)
                        , filespace    & ! intent(inout)
                        , memspace     & ! intent(inout)
                        , globdims     & ! intent(inout)
                        , chnkdims     & ! intent(inout)
                        , chnkoffs     & ! intent(inout)
-                       , cnt          & ! intent(inout)
-                       , stride       & ! intent(inout)
                        , memdims      & ! intent(inout)
                        , memoffs      & ! intent(inout)
                        , memsize      ! ! intent(inout)
 
    use ed_misc_coms,only: suppress_h5_warnings
-   
+
    implicit none
    !----- Arguments. ----------------------------------------------------------------------!
    real(kind=8)    , dimension(memsize(1),memsize(2),memsize(3),memsize(4))                &
@@ -5657,14 +5491,14 @@ subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
          call fatal_error('Could not get the hyperslabs filespace for '//trim(varn)//'!'   &
               ,'hdf_getslab_d','ed_init_full_history.F90')
       end if
-      
+
       call h5sselect_hyperslab_f(filespace,H5S_SELECT_SET_F,chnkoffs, &
            chnkdims,hdferr)
       if (hdferr /= 0) then
          call fatal_error('Couldn''t assign the hyperslab filespace for '//trim(varn)//'!' &
               ,'hdf_getslab_d','ed_init_full_history.F90')
       end if
-      
+
       call h5screate_simple_f(dsetrank,memsize,memspace,hdferr)
       if (hdferr /= 0) then
          write(unit=*,fmt=*) 'Chnkdims = ',chnkdims
@@ -5672,20 +5506,20 @@ subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
          call fatal_error('Couldn''t create the hyperslab memspace for '//trim(varn)//'!'  &
                          ,'hdf_getslab_d','ed_init_full_history.F90')
       end if
-      
+
       call h5sselect_hyperslab_f(memspace,H5S_SELECT_SET_F,memoffs, &
            memdims,hdferr)
       if (hdferr /= 0) then
          call fatal_error('Couldn''t assign the hyperslab filespace for '//trim(varn)//'!' &
               ,'hdf_getslab_d','ed_init_full_history.F90')
       end if
-      
+
       if (iparallel == 1) then
-         
+
          call h5dread_f(dset_id, H5T_NATIVE_DOUBLE,buff,globdims, hdferr, &
               mem_space_id = memspace, file_space_id = filespace, &
               xfer_prp = plist_id)
-         
+
          if (hdferr /= 0) then
             call fatal_error('Couldn''t read in hyperslab dataset for '//trim(varn)//'!'   &
                  ,'hdf_getslab_d','ed_init_full_history.F90')
@@ -5702,13 +5536,13 @@ subroutine hdf_getslab_d(buff,varn,dsetrank,iparallel,required,foundvar)
          end if
 
       end if
-      
+
       !  write(unit=*,fmt='(a)') 'History start: Loading '//trim(varn)//'...'
-      
+
       call h5sclose_f(filespace, hdferr)
       call h5sclose_f(memspace , hdferr)
       call h5dclose_f(dset_id  , hdferr)
-      
+
    end if
    return
 end subroutine hdf_getslab_d
@@ -5735,19 +5569,16 @@ end subroutine hdf_getslab_d
 ! FOUNDVAR  -- Output flag that tells whether the variable was found or not.               !
 !------------------------------------------------------------------------------------------!
 subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
-   
+
    use hdf5
    use hdf5_coms, only : file_id      & ! intent(inout)
                        , dset_id      & ! intent(inout)
-                       , dspace_id    & ! intent(inout)
                        , plist_id     & ! intent(inout)
                        , filespace    & ! intent(inout)
                        , memspace     & ! intent(inout)
                        , globdims     & ! intent(inout)
                        , chnkdims     & ! intent(inout)
                        , chnkoffs     & ! intent(inout)
-                       , cnt          & ! intent(inout)
-                       , stride       & ! intent(inout)
                        , memdims      & ! intent(inout)
                        , memoffs      & ! intent(inout)
                        , memsize      ! ! intent(inout)
@@ -5824,14 +5655,14 @@ subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
          call fatal_error('Could not get the hyperslabs filespace for '//trim(varn)//'!'   &
               ,'hdf_getslab_i','ed_init_full_history.F90')
       end if
-      
+
       call h5sselect_hyperslab_f(filespace,H5S_SELECT_SET_F,chnkoffs, &
            chnkdims,hdferr)
       if (hdferr /= 0) then
          call fatal_error('Couldn''t assign the hyperslab filespace for '//trim(varn)//'!' &
               ,'hdf_getslab_i','ed_init_full_history.F90')
       end if
-      
+
       call h5screate_simple_f(dsetrank,memsize,memspace,hdferr)
       if (hdferr /= 0) then
          write(unit=*,fmt=*) 'Chnkdims = ',chnkdims
@@ -5839,20 +5670,20 @@ subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
          call fatal_error('Couldn''t create the hyperslab memspace for '//trim(varn)//'!'  &
                          ,'hdf_getslab_i','ed_init_full_history.F90')
       end if
-      
+
       call h5sselect_hyperslab_f(memspace,H5S_SELECT_SET_F,memoffs, &
            memdims,hdferr)
       if (hdferr /= 0) then
          call fatal_error('Couldn''t assign the hyperslab filespace for '//trim(varn)//'!' &
               ,'hdf_getslab_i','ed_init_full_history.F90')
       end if
-      
+
       if (iparallel == 1) then
-         
+
          call h5dread_f(dset_id, H5T_NATIVE_INTEGER,buff,globdims, hdferr, &
               mem_space_id = memspace, file_space_id = filespace, &
               xfer_prp = plist_id)
-         
+
          if (hdferr /= 0) then
             call fatal_error('Couldn''t read in hyperslab dataset for '//trim(varn)//'!'   &
                  ,'hdf_getslab_i','ed_init_full_history.F90')
@@ -5869,449 +5700,17 @@ subroutine hdf_getslab_i(buff,varn,dsetrank,iparallel,required,foundvar)
          end if
 
       end if
-      
+
       !  write(unit=*,fmt='(a)') 'History start: Loading '//trim(varn)//'...'
-      
+
       call h5sclose_f(filespace, hdferr)
       call h5sclose_f(memspace , hdferr)
       call h5dclose_f(dset_id  , hdferr)
-      
+
    end if
    return
 end subroutine hdf_getslab_i
 !==========================================================================================!
 !==========================================================================================!
-end module
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine will set a full history start for the simulation.  In a full history !
-! start (runtype = 'HISTORY'), we assumes that you are continuing with the exact same      !
-! configuration as a given model simulation that wrote the file in which you are using.    !
-! In this case, each node starts with a list of polygons, and searches the HDF history     !
-! file for these polygons.  It expects to find at least one polygon in the file within 250 !
-! meters of proximity (although it should be exactly at the same place).  If it does not   !
-! find this it stops.                                                                      !
-!     Assuming that it finds the polygons, the subroutine then fills each of these         !
-! polygons with data, and traverses the data hierarchical tree that roots from each        !
-! polygon, initializing the model to the exact same state as the end of the previous run.  !
-! A search based restart does not expect to find exact matches, and may not use all of the !
-! polygons in the file.  Nonetheless, it will traverse the tree from these polygons and    !
-! populate the model states with what is found in the files tree.                          !
-!------------------------------------------------------------------------------------------!
-subroutine init_full_history_restart()
-   use mod_init_full_history
-   use ed_max_dims      , only : n_pft                 & ! intent(in)
-                               , str_len               ! ! intent(in)
-   use ed_misc_coms     , only : sfilin                & ! intent(in)
-                               , current_time          & ! intent(in)
-                               , max_poihist_dist      ! ! intent(in)
-   use ed_state_vars    , only : polygontype           & ! structure
-                               , sitetype              & ! structure
-                               , patchtype             & ! structure
-                               , edtype                & ! structure
-                               , edgrid_g              & ! structure
-                               , allocate_sitetype     & ! subroutine
-                               , allocate_patchtype    & ! subroutine
-                               , allocate_polygontype  ! ! subroutine
-   use soil_coms        , only : alloc_soilgrid        ! ! subroutine
-   use grid_coms        , only : ngrids                ! ! intent(in)
-   use phenology_startup, only : phenology_init        ! ! subroutine
-   use ed_node_coms     , only : mynum                 & ! intent(in)
-                               , nmachs                & ! intent(in)
-                               , nnodetot              & ! intent(in)
-                               , mchnum                & ! intent(in)
-                               , machs                 ! ! intent(in)
-   use hdf5
-   use hdf5_coms        , only : file_id               & ! intent(inout)
-                               , dset_id               & ! intent(inout)
-                               , dspace_id             & ! intent(inout)
-                               , plist_id              & ! intent(inout)
-                               , globdims              & ! intent(inout)
-                               , chnkdims              & ! intent(inout)
-                               , chnkoffs              ! ! intent(inout)
-   implicit none
-   !------ Local variables. ---------------------------------------------------------------!
-   type(edtype)                        , pointer     :: cgrid
-   type(polygontype)                   , pointer     :: cpoly
-   type(sitetype)                      , pointer     :: csite
-   type(patchtype)                     , pointer     :: cpatch
-   character(len=3)                                  :: cgr
-   character(len=str_len)                            :: hnamel
-   integer               , dimension(:), allocatable :: pysi_n
-   integer               , dimension(:), allocatable :: pysi_id
-   integer               , dimension(:), allocatable :: sipa_n
-   integer               , dimension(:), allocatable :: sipa_id
-   integer               , dimension(:), allocatable :: paco_n
-   integer               , dimension(:), allocatable :: paco_id
-   integer                                           :: ngr
-   integer                                           :: ifpy
-   integer                                           :: ipy
-   integer                                           :: isi
-   integer                                           :: ipa
-   integer                                           :: py_index
-   integer                                           :: si_index
-   integer                                           :: pa_index
-   integer                                           :: hdferr
-   logical               , dimension(:), allocatable :: is_burnt
-   logical                                           :: exists
-   real                  , dimension(:), allocatable :: file_lats
-   real                  , dimension(:), allocatable :: file_lons
-   real                                              :: mindist
-   real                                              :: polydist
-   real(kind=8)                                      :: dbletime
-   !------ Local constants. ---------------------------------------------------------------!
-   character(len=1)                    , parameter   :: vnam = 'S'
-   !------ External functions. ------------------------------------------------------------!
-   real                                , external    :: dist_gc
-   !---------------------------------------------------------------------------------------!
 
-
-
-   write (unit=*,fmt='(a)') '-----------------------------------------------------'
-   write (unit=*,fmt='(a)') '  Loading Full State (HISTORY)'
-
-
-   !----- Open the HDF environment. -------------------------------------------------------!
-   call h5open_f(hdferr)
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !---------------------------------------------------------------------------------------!
-   !     Turn off automatic error printing.  This is done because there may be datasets    !
-   ! that are not in the file, but it is OK.  If data that should be there are missing,    !
-   ! ED2 error reporting will detect it.  If something that can't be found is missing, the !
-   ! following call can be bypassed.  Note that automatic error reporting is turned back   !
-   ! on in the end.                                                                        !
-   !---------------------------------------------------------------------------------------!
-   call h5eset_auto_f(0,hdferr)
-
-
-   gridloop: do ngr=1,ngrids
-      cgrid => edgrid_g(ngr)
-
-      !------------------------------------------------------------------------------------!
-      !     Make the history file name.                                                    !
-      !------------------------------------------------------------------------------------!
-      write(cgr,'(a1,i2.2)') 'g',ngr
-
-      dbletime = dble(current_time%time)
-
-      call makefnam(hnamel,sfilin(1),dbletime,current_time%year,current_time%month         &
-                   ,current_time%date,0,vnam,cgr,'h5 ')
-      inquire(file=trim(hnamel),exist=exists)
-
-      if (.not.exists) then
-         !----- History couldn't be found.  Stop the run. ---------------------------------!
-         call fatal_error ('File '//trim(hnamel)//' not found.'                            &
-                          ,'init_full_history_restart','ed_init_full_history.F90')
-      else
-         call h5fopen_f(hnamel, H5F_ACC_RDONLY_F, file_id, hdferr)
-         if (hdferr < 0) then
-            write(unit=*,fmt='(a,1x,i8)') 'Error opening HDF5 file - error - ',hdferr
-            write(unit=*,fmt='(a,1x,a)' ) '- Filename: ',trim(hnamel)
-            call fatal_error('Error opening HDF5 file - error - '//trim(hnamel)            &
-                            ,'init_full_history_restart','ed_init_full_history.F90')
-         end if
-      end if
-
-
-      !------------------------------------------------------------------------------------!
-      !     Retrieve global vector sizes.                                                  !
-      !------------------------------------------------------------------------------------!
-      globdims    = 0_8
-      chnkdims    = 0_8
-      chnkoffs    = 0_8
-      globdims(1) = 1_8
-      
-      call h5dopen_f(file_id,'NPOLYGONS_GLOBAL', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%npolygons_global,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      call h5dopen_f(file_id,'NSITES_GLOBAL', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%nsites_global,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      call h5dopen_f(file_id,'NPATCHES_GLOBAL', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%npatches_global,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      call h5dopen_f(file_id,'NCOHORTS_GLOBAL', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,cgrid%ncohorts_global,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      !------------------------------------------------------------------------------------!
-
-
-
-      !------------------------------------------------------------------------------------!
-      !     Retrieve the mapping of the data tree.                                         !
-      !------------------------------------------------------------------------------------!
-      globdims    = 0_8
-      globdims(1) = int(cgrid%npolygons_global,8)
-      
-      allocate(pysi_n(cgrid%npolygons_global))
-      allocate(pysi_id(cgrid%npolygons_global))
-      
-      call h5dopen_f(file_id,'PYSI_N', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,pysi_n,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      call h5dopen_f(file_id,'PYSI_ID', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,pysi_id,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      globdims(1) = int(cgrid%nsites_global,8)
-      
-      allocate(sipa_n(cgrid%nsites_global))
-      allocate(sipa_id(cgrid%nsites_global))
-      
-      call h5dopen_f(file_id,'SIPA_N', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,sipa_n,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      call h5dopen_f(file_id,'SIPA_ID', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,sipa_id,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      globdims(1) = int(cgrid%npatches_global,8)
-      
-      allocate(paco_n(cgrid%npatches_global))
-      allocate(paco_id(cgrid%npatches_global))
-      
-      call h5dopen_f(file_id,'PACO_N', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,paco_n,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      
-      call h5dopen_f(file_id,'PACO_ID', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER,paco_id,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-      !------------------------------------------------------------------------------------!
-      
-      
-      !------------------------------------------------------------------------------------!
-      !      Retrieve the polygon coordinates data.                                        !
-      !------------------------------------------------------------------------------------!
-      globdims(1) = int(cgrid%npolygons_global,8)
-      allocate(file_lats(cgrid%npolygons_global))
-      allocate(file_lons(cgrid%npolygons_global))
-      
-      call h5dopen_f(file_id,'LATITUDE', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL,file_lats,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-
-      call h5dopen_f(file_id,'LONGITUDE', dset_id, hdferr)
-      call h5dget_space_f(dset_id, dspace_id, hdferr)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL,file_lons,globdims, hdferr)
-      call h5sclose_f(dspace_id, hdferr)
-      call h5dclose_f(dset_id, hdferr)
-
-
-
-      !------------------------------------------------------------------------------------!
-      !     Loop the polygons in the model state and match them with those in the file.    !
-      ! After the match, we must walk through the data from that polygon and initialize.   !
-      ! We check the distance between the expected coordinates and the retrieved ones, and !
-      ! they ought to be less than 250 metres apart, otherwise we can't use the polygon.   !
-      !------------------------------------------------------------------------------------!
-      polyloop: do ipy = 1,cgrid%npolygons
-         cpoly => cgrid%polygon(ipy)
-
-         py_index   = 0
-         mindist    = huge(1.)
-         do ifpy = 1,cgrid%npolygons_global
-            polydist = dist_gc(file_lons(ifpy),cgrid%lon(ipy)                              &
-                              ,file_lats(ifpy),cgrid%lat(ipy))
-            if (polydist < mindist) then
-               mindist    = polydist
-               py_index   = ifpy
-            end if
-         end do
-
-         !---------------------------------------------------------------------------------!
-         !     Check whether the closest polygon is close.                                 !
-         !---------------------------------------------------------------------------------!
-         if (mindist > max_poihist_dist) then
-            write (unit=*,fmt='(a)'          ) '------------------------------------------'
-            write (unit=*,fmt='(a)'          ) ' None of the polygons in the history file'
-            write (unit=*,fmt='(a)'          ) '    is enough close!  The model will stop!'
-            write (unit=*,fmt='(a)'          ) ' ED Polygon:'
-            write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',ipy
-            write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',cgrid%lon(ipy)
-            write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',cgrid%lat(ipy)
-            write (unit=*,fmt='(a)'          ) ' History file''s closest polygon:'
-            write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',py_index
-            write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',file_lons(py_index)
-            write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',file_lats(py_index)
-            write (unit=*,fmt='(a)'          ) '------------------------------------------'
-
-            call fatal_error('Mismatch between polygon and dataset'                        &
-                            ,'init_full_history_restart','ed_init_full_history.F90')
-         end if
-         !---------------------------------------------------------------------------------!
-
-         !---------------------------------------------------------------------------------!
-         !      Get all necessary polygon variables associated with this index for the     !
-         ! current polygon.                                                                !
-         !---------------------------------------------------------------------------------!
-         call fill_history_grid(cgrid,ipy,py_index)
-
-         if (pysi_n(py_index) > 0) then
-            !----- Allocate the polygontype structure (site level). -----------------------!
-            call allocate_polygontype(cpoly,pysi_n(py_index))
-            !------------------------------------------------------------------------------!
-
-
-
-            !------------------------------------------------------------------------------!
-            !     Get all necessary site variables associated with this index for the      !
-            ! current polygon.                                                             !
-            !------------------------------------------------------------------------------!
-            allocate (is_burnt(pysi_n(py_index)))
-            is_burnt(:) = .false.
-            call fill_history_polygon(cpoly,pysi_id(py_index),cgrid%nsites_global          &
-                                     ,pysi_n(py_index),is_burnt)
-            
-            siteloop: do isi = 1,cpoly%nsites
-               csite => cpoly%site(isi)
-               
-               !------ Calculate the index of this site's data in the HDF. ----------------!
-               si_index = pysi_id(py_index) + isi - 1
-
-               if (sipa_n(si_index) > 0) then
-                  !----- Allocate the sitetype structure (patch level). -------------------!
-                  call allocate_sitetype(csite,sipa_n(si_index))
-
-                  !------------------------------------------------------------------------!
-                  !     Get all necessary site variables associated with this index for    !
-                  ! the current site.                                                      !
-                  !------------------------------------------------------------------------!
-                  call fill_history_site(csite,sipa_id(si_index),cgrid%npatches_global     &
-                                        ,is_burnt(isi))
-
-                  patchloop: do ipa = 1,csite%npatches
-                     cpatch => csite%patch(ipa)
-                     pa_index = sipa_id(si_index) + ipa - 1
-
-                     if (paco_n(pa_index) > 0) then
-                        !----- Allocate the patchtype structure (cohort level). -----------!
-                        call allocate_patchtype(cpatch,paco_n(pa_index))
-                        
-                        !------------------------------------------------------------------!
-                        !     Get all necessary site variables associated with this index  !
-                        ! for the current patch.                                           !
-                        !------------------------------------------------------------------!
-                        call fill_history_patch(cpatch,paco_id(pa_index)                   &
-                                               ,cgrid%ncohorts_global)
-                        !------------------------------------------------------------------!
-                     else
-                        cpatch%ncohorts = 0
-                     endif
-                  end do patchloop
-               else
-                  write (unit=*,fmt='(a)'          ) '------------------------------------'
-                  write (unit=*,fmt='(a)'          ) ' Found a site with no patches.'
-                  write (unit=*,fmt='(a)'          ) ' This is not allowed.'
-                  write (unit=*,fmt='(a)'          ) ' ED Polygon and Site:'
-                  write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',ipy
-                  write (unit=*,fmt='(a,1x,i8)'    ) ' - Site      :',isi
-                  write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',cgrid%lon(ipy)
-                  write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',cgrid%lat(ipy)
-                  write (unit=*,fmt='(a)'          ) '------------------------------------'
-                  call fatal_error('Attempted to load an empty site.'                      &
-                                  ,'init_full_history_restart','ed_init_full_history.F90')
-               end if
-
-            end do siteloop
-            deallocate (is_burnt)
-            
-         else
-            write (unit=*,fmt='(a)'          ) '------------------------------------'
-            write (unit=*,fmt='(a)'          ) ' Found a polygon with no sites.'
-            write (unit=*,fmt='(a)'          ) ' This is not allowed.'
-            write (unit=*,fmt='(a)'          ) ' ED Polygon:'
-            write (unit=*,fmt='(a,1x,i8)'    ) ' - Polygon   :',ipy
-            write (unit=*,fmt='(a,1x,es12.5)') ' - Longitude :',cgrid%lon(ipy)
-            write (unit=*,fmt='(a,1x,es12.5)') ' - Latitude  :',cgrid%lat(ipy)
-            write (unit=*,fmt='(a)'          ) '------------------------------------'
-            call fatal_error('Attempted to load an empty polygon.'                         &
-                            ,'init_full_history_restart','ed_init_full_history.F90')
-         end if
-      end do polyloop
-
-
-      call h5fclose_f(file_id, hdferr)
-      if (hdferr /= 0) then
-          print*,hdferr
-          call fatal_error('Could not close the HDF file'                                  &
-                          ,'init_full_history_restart','ed_init_full_history.F90')
-          
-      end if
-
-      deallocate(file_lats)
-      deallocate(file_lons)
-      deallocate(paco_n)
-      deallocate(paco_id)
-      deallocate(sipa_n)
-      deallocate(sipa_id)
-      deallocate(pysi_n)
-      deallocate(pysi_id)
-
-   end do gridloop
-
-   !---------------------------------------------------------------------------------------!
-   !     Turn automatic error reporting back on.  This is probably unnecessary, because    !
-   ! the environment is about to be flushed.                                               !
-   !---------------------------------------------------------------------------------------!
-   call h5eset_auto_f(1,hdferr)
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !----- Close the HDF environment. ------------------------------------------------------!
-   call h5close_f(hdferr)
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !----- Load the anthropogenic disturbance (or set them all to zero). -------------------!
-   write(unit=*,fmt='(a,i2.2)') ' Checking anthropogenic disturbance.  Node: ',mynum
-   call landuse_init()
-   !---------------------------------------------------------------------------------------!
-
-
-   !----- Load phenology in case it is prescribed (or set them with defaults). ------------!
-   write(unit=*,fmt='(a,i2.2)') ' Checking prescribed phenology.  Node: ',mynum
-   call phenology_init()
-
-   return
-end subroutine init_full_history_restart
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
+end module ed_init_full_history

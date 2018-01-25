@@ -1,120 +1,5 @@
-module mod_landuse_init
-contains
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine reads the plantation fraction.                                       !
-!------------------------------------------------------------------------------------------!
-subroutine read_plantation_fractions(cpoly,polylon,polylat,igr)
-   use ed_state_vars , only : polygontype         ! ! structure
-   use ed_max_dims   , only : str_len             ! ! intent(in)
-   use disturb_coms  , only : plantation_file     & ! intent(in)
-                            , max_plantation_dist & ! intent(in)
-                            , min_plantation_frac ! ! intent(in)
-
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(polygontype)     , target      :: cpoly
-   real                  , intent(in)  :: polylon
-   real                  , intent(in)  :: polylat
-   integer               , intent(in)  :: igr
-   !----- Local variables -----------------------------------------------------------------!
-   character(len=str_len)              :: fname
-   logical                             :: exans
-   integer                             :: ierr
-   integer                             :: isi
-   real, dimension(:)    , allocatable :: plantlon
-   real, dimension(:)    , allocatable :: plantlat
-   real, dimension(:)    , allocatable :: plantdist
-   real, dimension(:)    , allocatable :: fracplant
-   real                                :: rdum
-   integer                             :: ndat
-   integer                             :: n
-   !----- Local constants. ----------------------------------------------------------------!
-   character(len=12)    , parameter    :: fffmt='(a,1x,f12.5)'
-   character(len=13)    , parameter    :: esfmt='(a,1x,es12.5)'
-   !----- External functions. -------------------------------------------------------------!
-   real                  , external    :: dist_gc
-   !---------------------------------------------------------------------------------------!
-
-
-   !---------------------------------------------------------------------------------------!
-   !     If the user left the plantation file empty, it means that they don't want to      !
-   ! use plantation files, skip the subroutine and don't print any warnings.               !
-   !---------------------------------------------------------------------------------------!
-   if (len_trim(plantation_file(igr)) == 0) then
-      return
-   else
-      !----- Check whether plantation file exists. ----------------------------------------!
-      inquire(file=trim(plantation_file(igr)),exist=exans)
-      if (.not.exans)then
-         write (unit=*,fmt='(a)') '-------------------------------------------------------'
-         write (unit=*,fmt='(a)') 'File :'//trim(plantation_file(igr))//' not found...'
-         write (unit=*,fmt='(a)') 'Assuming that there are no plantations'
-         write (unit=*,fmt='(a)') '-------------------------------------------------------'
-         return
-      end if
-   end if
-   !---------------------------------------------------------------------------------------!
-
-
-
-   !---------------------------------------------------------------------------------------!
-   !     If we reach this point, then there is a plantation file. Open it.                 !
-   !---------------------------------------------------------------------------------------!
-   open (unit=12, file=trim(plantation_file(igr)), form='formatted', status='old')
-   !----- The first loop will determine how many points are available. --------------------!
-   ndat = 0
-   countloop: do
-      read (unit=12,fmt=*,iostat=ierr) rdum
-      if (ierr /= 0) exit countloop
-      
-      ndat = ndat + 1
-   end do countloop
-   rewind(unit=12)
-
-   !----- Now that we know the number of lines, allocate the temporary vectors. -----------!
-   allocate (plantlon(ndat),plantlat(ndat),plantdist(ndat),fracplant(ndat))
-
-   !----- Now we read the data. -----------------------------------------------------------!
-   read_plantation: do n=1,ndat
-      read (unit=12,fmt=*) plantlat(n), plantlon(n), fracplant(n)
-      plantdist(n) = dist_gc(polylon,plantlon(n),polylat,plantlat(n))
-   end do read_plantation
-   close(unit=12,status='keep')
-
-   !----- Determine which point was the closest one. --------------------------------------!
-   n = minloc(plantdist,dim=1)
-
-   !----- Check whether the distance is not too large.  If it is, don't use it. -----------!
-   if (plantdist(n) > max_plantation_dist) then
-      write (unit=*,fmt='(a)') '----------------------------------------------------------'
-      write (unit=*,fmt=*)     ' The closest plantation point is too far away...'
-      write (unit=*,fmt=fffmt) ' - Polygon longitude:                       ',polylon
-      write (unit=*,fmt=fffmt) ' - Polygon latitude:                        ',polylat
-      write (unit=*,fmt=fffmt) ' - Plantation closest longitude:            ',plantlon(n)
-      write (unit=*,fmt=fffmt) ' - Plantation closest latitude:             ',plantlat(n)
-      write (unit=*,fmt=esfmt) ' - Distance between polygon and plantation: ',plantdist(n)
-      write (unit=*,fmt=esfmt) ' - Maximum accepted distance:               '              &
-                                  ,max_plantation_dist
-      write (unit=*,fmt=*)     ' '
-      write (unit=*,fmt='(a)') ' We will assume no plantations in this polygon.'
-      write (unit=*,fmt='(a)') '----------------------------------------------------------'
-
-   elseif (fracplant(n) > min_plantation_frac) then
-      !----- Assume that all sites are plantation sites. ----------------------------------!
-      do isi = 1,cpoly%nsites
-         cpoly%plantation(isi) = 1
-      end do
-   end if
-   !---------------------------------------------------------------------------------------!
-
-   deallocate(plantlon,plantlat,fracplant,plantdist)
-
-   return
-end subroutine read_plantation_fractions
-!==========================================================================================!
-!==========================================================================================!
-end module
+module landuse_init_module
+  contains
 
 !==========================================================================================!
 !==========================================================================================!
@@ -123,7 +8,6 @@ end module
 !------------------------------------------------------------------------------------------!
 subroutine landuse_init
 
-   use mod_landuse_init
    use ed_state_vars , only : edtype          & ! structure
                             , polygontype     & ! structure
                             , sitetype        & ! structure
@@ -160,7 +44,6 @@ subroutine landuse_init
    character(len=str_len)                     :: cdum
    integer                                    :: nharvest
    integer               , dimension(n_pft)   :: harvest_pft
-   integer                                    :: ierr
    integer                                    :: nf
    integer                                    :: nflist
    integer                                    :: nfllu
@@ -172,11 +55,9 @@ subroutine landuse_init
    integer                                    :: ipft
    integer                                    :: h
    integer                                    :: sim_years
-   integer                                    :: lu_years
    integer                                    :: yd_1st
    integer                                    :: yd_this
    integer                                    :: yd_last
-   integer                                    :: yd_tot
    logical                                    :: inside
    real                  , dimension(n_pft)   :: mindbh_1ary
    real                  , dimension(n_pft)   :: harvprob_1ary
@@ -564,7 +445,6 @@ subroutine read_plantation_fractions(cpoly,polylon,polylat,igr)
    real                  , intent(in)  :: polylat
    integer               , intent(in)  :: igr
    !----- Local variables -----------------------------------------------------------------!
-   character(len=str_len)              :: fname
    logical                             :: exans
    integer                             :: ierr
    integer                             :: isi
@@ -660,3 +540,5 @@ subroutine read_plantation_fractions(cpoly,polylon,polylat,igr)
 end subroutine read_plantation_fractions
 !==========================================================================================!
 !==========================================================================================!
+
+end module landuse_init_module

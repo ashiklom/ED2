@@ -1,5 +1,51 @@
-module mod_update_derived_props
-contains
+module update_derived_props_module
+  contains
+
+!==========================================================================================!
+!==========================================================================================!
+!     This subroutine will drive the update of derived properties.                         !
+!------------------------------------------------------------------------------------------!
+subroutine update_derived_props(cgrid)
+   use ed_state_vars , only : edtype      & ! structure
+                            , polygontype & ! structure
+                            , sitetype    ! ! structure
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(edtype)      , target  :: cgrid
+   !----- Local variables -----------------------------------------------------------------!
+   type(polygontype) , pointer :: cpoly
+   type(sitetype)    , pointer :: csite
+   integer                     :: ipy
+   integer                     :: isi
+   integer                     :: ipa
+   !---------------------------------------------------------------------------------------!
+   
+   do ipy = 1,cgrid%npolygons
+     cpoly => cgrid%polygon(ipy)
+     
+     do isi = 1,cpoly%nsites
+        csite => cpoly%site(isi)
+
+        do ipa = 1,csite%npatches
+           call update_patch_derived_props(csite,ipa)
+        end do
+
+        call update_site_derived_props(cpoly, 0, isi)
+     end do
+
+     call update_polygon_derived_props(cgrid)
+   end do
+
+   return
+end subroutine update_derived_props
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
 !==========================================================================================!
 !==========================================================================================!
 !      This subroutine will take care of derived patch-level structural quantities.  These !
@@ -11,10 +57,9 @@ subroutine update_patch_derived_props(csite,ipa)
    use ed_state_vars       , only : sitetype                   & ! structure
                                   , patchtype                  ! ! structure
    use allometry           , only : ed_biomass                 ! ! function
-   use fuse_fiss_utils     , only : patch_pft_size_profile     ! ! subroutine
+   use patch_pft_size_profile_mod     ! ! subroutine
    use canopy_air_coms     , only : veg_height_min             & ! intent(in)
                                   , minimum_canopy_depth       & ! intent(in)
-                                  , ez                         & ! intent(in)
                                   , vh2vr                      & ! intent(in)
                                   , vh2dh                      ! ! intent(in)
    use soil_coms           , only : soil_rough                 & ! intent(in)
@@ -72,9 +117,7 @@ subroutine update_patch_derived_props(csite,ipa)
 
       !----- Compute the patch-level above-ground biomass
       csite%plant_ag_biomass(ipa) = csite%plant_ag_biomass(ipa)                            &
-                                  + ed_biomass(cpatch%bdead(ico),cpatch%bleaf(ico)         &
-                                              ,cpatch%bsapwooda(ico),cpatch%pft(ico))                      &
-                                  * cpatch%nplant(ico)           
+                                  + ed_biomass(cpatch, ico) * cpatch%nplant(ico)
       !------------------------------------------------------------------------------------!
 
 
@@ -166,6 +209,193 @@ end subroutine update_patch_derived_props
 !==========================================================================================!
 
 
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+!      This subroutine will take care of some diagnostic thermodynamic properties.         !
+!------------------------------------------------------------------------------------------!
+subroutine update_patch_thermo_props(csite,ipaa,ipaz,mzg,mzs,ntext_soil)
+  
+   use ed_state_vars, only : sitetype         ! ! structure
+   use therm_lib    , only : idealdenssh      & ! function
+                           , press2exner      & ! function
+                           , extheta2temp     & ! function
+                           , uextcm2tl        & ! function
+                           , uint2tl          ! ! function
+   use consts_coms  , only : t00              & ! intent(in)
+                           , wdns             ! ! intent(in)
+   use soil_coms    , only : soil             & ! intent(in)
+                           , matric_potential ! ! function
+   implicit none
+
+   !----- Arguments -----------------------------------------------------------------------!
+   type(sitetype)                , target     :: csite
+   integer                       , intent(in) :: ipaa
+   integer                       , intent(in) :: ipaz
+   integer                       , intent(in) :: mzg
+   integer                       , intent(in) :: mzs
+   integer       , dimension(mzg), intent(in) :: ntext_soil
+   !----- Local variables. ----------------------------------------------------------------!
+   integer                                    :: ipa
+   integer                                    :: nsoil
+   integer                                    :: ksn
+   integer                                    :: k
+   real                                       :: soilhcap
+   real                                       :: can_exner
+   !---------------------------------------------------------------------------------------!
+
+
+   do ipa=ipaa,ipaz
+
+      !----- Canopy air temperature and density. ------------------------------------------!
+      can_exner           = press2exner (csite%can_prss(ipa))
+      csite%can_temp(ipa) = extheta2temp(can_exner,csite%can_theta(ipa))
+      csite%can_rhos(ipa) = idealdenssh ( csite%can_prss  (ipa)                            &
+                                        , csite%can_temp  (ipa)                            &
+                                        , csite%can_shv   (ipa)                            )
+      !------------------------------------------------------------------------------------!
+
+
+      !----- Update soil temperature and liquid water fraction. ---------------------------!
+      do k = 1, mzg
+         nsoil    = ntext_soil(k)
+         soilhcap = soil(nsoil)%slcpd
+         call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*wdns,soilhcap     &
+                       ,csite%soil_tempk(k,ipa),csite%soil_fracliq(k,ipa))
+         csite%soil_mstpot(k,ipa) = matric_potential(nsoil,csite%soil_water(k,ipa))
+      end do
+      !------------------------------------------------------------------------------------!
+
+
+
+      !----- Update temporary surface water temperature and liquid water fraction. --------!
+      ksn = csite%nlev_sfcwater(ipa)
+      csite%total_sfcw_depth(ipa) = 0.
+      do k = 1, ksn
+         call uint2tl(csite%sfcwater_energy(k,ipa),csite%sfcwater_tempk(k,ipa)             &
+                     ,csite%sfcwater_fracliq(k,ipa))
+         csite%total_sfcw_depth(ipa) =  csite%total_sfcw_depth(ipa)                        &
+                                     +  csite%sfcwater_depth(k,ipa)
+      end do
+      do k = ksn+1,mzs
+         if (k == 1) then
+            csite%sfcwater_tempk  (k,ipa) = csite%soil_tempk  (mzg,ipa)
+            csite%sfcwater_fracliq(k,ipa) = csite%soil_fracliq(mzg,ipa)
+         else
+            csite%sfcwater_tempk  (k,ipa) = csite%sfcwater_tempk  (k-1,ipa)
+            csite%sfcwater_fracliq(k,ipa) = csite%sfcwater_fracliq(k-1,ipa)
+         end if
+      end do
+      !------------------------------------------------------------------------------------!
+   end do
+   !---------------------------------------------------------------------------------------!
+
+   return
+end subroutine update_patch_thermo_props
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+!      This subroutine will update the fast mean properties, similarly to the routine      !
+! above.                                                                                   !
+!------------------------------------------------------------------------------------------!
+subroutine update_patch_thermo_fmean(csite,ipaa,ipaz,mzg,ntext_soil)
+  
+   use ed_state_vars, only : sitetype           ! ! structure
+   use therm_lib    , only : idealdenssh        & ! function
+                           , press2exner        & ! function
+                           , extheta2temp       & ! function
+                           , uextcm2tl          & ! function
+                           , uint2tl            ! ! function
+   use consts_coms  , only : t00                & ! intent(in)
+                           , wdns               ! ! intent(in)
+   use soil_coms    , only : soil               & ! intent(in)
+                           , tiny_sfcwater_mass & ! intent(in)
+                           , matric_potential   ! ! function
+   implicit none
+
+   !----- Arguments -----------------------------------------------------------------------!
+   type(sitetype)                , target     :: csite
+   integer                       , intent(in) :: ipaa
+   integer                       , intent(in) :: ipaz
+   integer                       , intent(in) :: mzg
+   integer       , dimension(mzg), intent(in) :: ntext_soil
+   !----- Local variables. ----------------------------------------------------------------!
+   integer                                    :: ipa
+   integer                                    :: nsoil
+   integer                                    :: k
+   real                                       :: soilhcap
+   real                                       :: can_exner
+   !---------------------------------------------------------------------------------------!
+
+
+   !---------------------------------------------------------------------------------------!
+   do ipa=ipaa,ipaz
+
+      !----- Canopy air temperature and density. ------------------------------------------!
+      can_exner                 = press2exner (csite%fmean_can_prss(ipa))
+      csite%fmean_can_temp(ipa) = extheta2temp(can_exner,csite%fmean_can_theta(ipa))
+      csite%fmean_can_rhos(ipa) = idealdenssh ( csite%fmean_can_prss  (ipa)                &
+                                              , csite%fmean_can_temp  (ipa)                &
+                                              , csite%fmean_can_shv   (ipa)                )
+      !------------------------------------------------------------------------------------!
+
+
+      !----- Update soil temperature and liquid water fraction. ---------------------------!
+      do k = 1, mzg
+         nsoil    = ntext_soil(k)
+         soilhcap = soil(nsoil)%slcpd
+         call uextcm2tl( csite%fmean_soil_energy(k,ipa)                                    &
+                       , csite%fmean_soil_water (k,ipa) * wdns                             &
+                       , soilhcap                                                          &
+                       , csite%fmean_soil_temp  (k,ipa)                                    &
+                       , csite%fmean_soil_fliq  (k,ipa) )
+         csite%fmean_soil_mstpot(k,ipa) = matric_potential( nsoil                          &
+                                                          , csite%fmean_soil_water(k,ipa))
+      end do
+      !------------------------------------------------------------------------------------!
+
+
+
+
+      !------------------------------------------------------------------------------------!
+      !   If the patch had some temporary snow/pounding layer, convert the mean energy to  !
+      ! J/kg, then find the mean temperature and liquid fraction.  Otherwise, set them to  !
+      ! either zero or default values.                                                     !
+      !------------------------------------------------------------------------------------!
+      if (csite%fmean_sfcw_mass(ipa) > tiny_sfcwater_mass) then
+         csite%fmean_sfcw_energy(ipa) = csite%fmean_sfcw_energy(ipa)                       &
+                                      / csite%fmean_sfcw_mass(ipa)
+         call uint2tl(csite%fmean_sfcw_energy(ipa),csite%fmean_sfcw_temp(ipa)              &
+                     ,csite%fmean_sfcw_fliq(ipa))
+      else
+         csite%fmean_sfcw_mass  (ipa)  = 0.
+         csite%fmean_sfcw_depth (ipa)  = 0.
+         csite%fmean_sfcw_energy(ipa)  = 0.
+         csite%fmean_sfcw_temp  (ipa)  = csite%fmean_soil_temp(mzg,ipa)
+         csite%fmean_sfcw_fliq  (ipa)  = csite%fmean_soil_fliq(mzg,ipa)
+      end if
+      !-----------------------------------------------------------------------------------!
+   end do
+   return
+end subroutine update_patch_thermo_fmean
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
 !==========================================================================================!
 !==========================================================================================!
 !     This subroutine will update the derived properties at the site level.                !
@@ -224,6 +454,11 @@ end subroutine update_site_derived_props
 !==========================================================================================!
 !==========================================================================================!
 
+
+
+
+
+
 !==========================================================================================!
 !==========================================================================================!
 !     The following subroutine finds the polygon averages from site-, patch-, and cohort-  !
@@ -236,10 +471,8 @@ subroutine update_polygon_derived_props(cgrid)
                                     , polygontype        & ! structure
                                     , sitetype           & ! structure
                                     , patchtype          ! ! structure
-   use soil_coms             , only : soil               & ! intent(in)
-                                    , dslz               ! ! intent(in)
-   use grid_coms             , only : nzg                & ! intent(in)
-                                    , nzs                ! ! intent(in)
+   use soil_coms             , only : dslz               ! ! intent(in)
+   use grid_coms             , only : nzg                ! ! intent(in)
    use ed_max_dims           , only : n_dbh              ! ! intent(in)
    use ed_misc_coms          , only : ddbhi              ! ! intent(in)
    use pft_coms              , only : c2n_leaf           & ! intent(in)
@@ -619,227 +852,7 @@ end subroutine update_polygon_derived_props
 
 
 
-end module mod_update_derived_props
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine will drive the update of derived properties.                         !
-!------------------------------------------------------------------------------------------!
-subroutine update_derived_props(cgrid)
-   use mod_update_derived_props
-   use ed_state_vars , only : edtype      & ! structure
-                            , polygontype & ! structure
-                            , sitetype    ! ! structure
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(edtype)      , target  :: cgrid
-   !----- Local variables -----------------------------------------------------------------!
-   type(polygontype) , pointer :: cpoly
-   type(sitetype)    , pointer :: csite
-   integer                     :: ipy
-   integer                     :: isi
-   integer                     :: ipa
-   !---------------------------------------------------------------------------------------!
-   
-   do ipy = 1,cgrid%npolygons
-     cpoly => cgrid%polygon(ipy)
-     
-     do isi = 1,cpoly%nsites
-        csite => cpoly%site(isi)
 
-        do ipa = 1,csite%npatches
-           call update_patch_derived_props(csite,ipa)
-        end do
-
-        call update_site_derived_props(cpoly, 0, isi)
-     end do
-
-     call update_polygon_derived_props(cgrid)
-   end do
-
-   return
-end subroutine update_derived_props
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-!      This subroutine will take care of some diagnostic thermodynamic properties.         !
-!------------------------------------------------------------------------------------------!
-subroutine update_patch_thermo_props(csite,ipaa,ipaz,mzg,mzs,ntext_soil)
-  
-   use ed_state_vars, only : sitetype         ! ! structure
-   use therm_lib    , only : idealdenssh      & ! function
-                           , press2exner      & ! function
-                           , extheta2temp     & ! function
-                           , uextcm2tl        & ! function
-                           , uint2tl          ! ! function
-   use consts_coms  , only : t00              & ! intent(in)
-                           , wdns             ! ! intent(in)
-   use soil_coms    , only : soil             & ! intent(in)
-                           , matric_potential ! ! function
-   implicit none
-
-   !----- Arguments -----------------------------------------------------------------------!
-   type(sitetype)                , target     :: csite
-   integer                       , intent(in) :: ipaa
-   integer                       , intent(in) :: ipaz
-   integer                       , intent(in) :: mzg
-   integer                       , intent(in) :: mzs
-   integer       , dimension(mzg), intent(in) :: ntext_soil
-   !----- Local variables. ----------------------------------------------------------------!
-   integer                                    :: ipa
-   integer                                    :: nsoil
-   integer                                    :: ksn
-   integer                                    :: k
-   real                                       :: soilhcap
-   real                                       :: can_exner
-   !---------------------------------------------------------------------------------------!
-
-
-   do ipa=ipaa,ipaz
-
-      !----- Canopy air temperature and density. ------------------------------------------!
-      can_exner           = press2exner (csite%can_prss(ipa))
-      csite%can_temp(ipa) = extheta2temp(can_exner,csite%can_theta(ipa))
-      csite%can_rhos(ipa) = idealdenssh ( csite%can_prss  (ipa)                            &
-                                        , csite%can_temp  (ipa)                            &
-                                        , csite%can_shv   (ipa)                            )
-      !------------------------------------------------------------------------------------!
-
-
-      !----- Update soil temperature and liquid water fraction. ---------------------------!
-      do k = 1, mzg
-         nsoil    = ntext_soil(k)
-         soilhcap = soil(nsoil)%slcpd
-         call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*wdns,soilhcap     &
-                       ,csite%soil_tempk(k,ipa),csite%soil_fracliq(k,ipa))
-         csite%soil_mstpot(k,ipa) = matric_potential(nsoil,csite%soil_water(k,ipa))
-      end do
-      !------------------------------------------------------------------------------------!
-
-
-
-      !----- Update temporary surface water temperature and liquid water fraction. --------!
-      ksn = csite%nlev_sfcwater(ipa)
-      csite%total_sfcw_depth(ipa) = 0.
-      do k = 1, ksn
-         call uint2tl(csite%sfcwater_energy(k,ipa),csite%sfcwater_tempk(k,ipa)             &
-                     ,csite%sfcwater_fracliq(k,ipa))
-         csite%total_sfcw_depth(ipa) =  csite%total_sfcw_depth(ipa)                        &
-                                     +  csite%sfcwater_depth(k,ipa)
-      end do
-      do k = ksn+1,mzs
-         if (k == 1) then
-            csite%sfcwater_tempk  (k,ipa) = csite%soil_tempk  (mzg,ipa)
-            csite%sfcwater_fracliq(k,ipa) = csite%soil_fracliq(mzg,ipa)
-         else
-            csite%sfcwater_tempk  (k,ipa) = csite%sfcwater_tempk  (k-1,ipa)
-            csite%sfcwater_fracliq(k,ipa) = csite%sfcwater_fracliq(k-1,ipa)
-         end if
-      end do
-      !------------------------------------------------------------------------------------!
-   end do
-   !---------------------------------------------------------------------------------------!
-
-   return
-end subroutine update_patch_thermo_props
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-!      This subroutine will update the fast mean properties, similarly to the routine      !
-! above.                                                                                   !
-!------------------------------------------------------------------------------------------!
-subroutine update_patch_thermo_fmean(csite,ipaa,ipaz,mzg,ntext_soil)
-  
-   use ed_state_vars, only : sitetype           ! ! structure
-   use therm_lib    , only : idealdenssh        & ! function
-                           , press2exner        & ! function
-                           , extheta2temp       & ! function
-                           , uextcm2tl          & ! function
-                           , uint2tl            ! ! function
-   use consts_coms  , only : t00                & ! intent(in)
-                           , wdns               ! ! intent(in)
-   use soil_coms    , only : soil               & ! intent(in)
-                           , tiny_sfcwater_mass & ! intent(in)
-                           , matric_potential   ! ! function
-   implicit none
-
-   !----- Arguments -----------------------------------------------------------------------!
-   type(sitetype)                , target     :: csite
-   integer                       , intent(in) :: ipaa
-   integer                       , intent(in) :: ipaz
-   integer                       , intent(in) :: mzg
-   integer       , dimension(mzg), intent(in) :: ntext_soil
-   !----- Local variables. ----------------------------------------------------------------!
-   integer                                    :: ipa
-   integer                                    :: nsoil
-   integer                                    :: k
-   real                                       :: soilhcap
-   real                                       :: can_exner
-   !---------------------------------------------------------------------------------------!
-
-
-   !---------------------------------------------------------------------------------------!
-   do ipa=ipaa,ipaz
-
-      !----- Canopy air temperature and density. ------------------------------------------!
-      can_exner                 = press2exner (csite%fmean_can_prss(ipa))
-      csite%fmean_can_temp(ipa) = extheta2temp(can_exner,csite%fmean_can_theta(ipa))
-      csite%fmean_can_rhos(ipa) = idealdenssh ( csite%fmean_can_prss  (ipa)                &
-                                              , csite%fmean_can_temp  (ipa)                &
-                                              , csite%fmean_can_shv   (ipa)                )
-      !------------------------------------------------------------------------------------!
-
-
-      !----- Update soil temperature and liquid water fraction. ---------------------------!
-      do k = 1, mzg
-         nsoil    = ntext_soil(k)
-         soilhcap = soil(nsoil)%slcpd
-         call uextcm2tl( csite%fmean_soil_energy(k,ipa)                                    &
-                       , csite%fmean_soil_water (k,ipa) * wdns                             &
-                       , soilhcap                                                          &
-                       , csite%fmean_soil_temp  (k,ipa)                                    &
-                       , csite%fmean_soil_fliq  (k,ipa) )
-         csite%fmean_soil_mstpot(k,ipa) = matric_potential( nsoil                          &
-                                                          , csite%fmean_soil_water(k,ipa))
-      end do
-      !------------------------------------------------------------------------------------!
-
-
-
-
-      !------------------------------------------------------------------------------------!
-      !   If the patch had some temporary snow/pounding layer, convert the mean energy to  !
-      ! J/kg, then find the mean temperature and liquid fraction.  Otherwise, set them to  !
-      ! either zero or default values.                                                     !
-      !------------------------------------------------------------------------------------!
-      if (csite%fmean_sfcw_mass(ipa) > tiny_sfcwater_mass) then
-         csite%fmean_sfcw_energy(ipa) = csite%fmean_sfcw_energy(ipa)                       &
-                                      / csite%fmean_sfcw_mass(ipa)
-         call uint2tl(csite%fmean_sfcw_energy(ipa),csite%fmean_sfcw_temp(ipa)              &
-                     ,csite%fmean_sfcw_fliq(ipa))
-      else
-         csite%fmean_sfcw_mass  (ipa)  = 0.
-         csite%fmean_sfcw_depth (ipa)  = 0.
-         csite%fmean_sfcw_energy(ipa)  = 0.
-         csite%fmean_sfcw_temp  (ipa)  = csite%fmean_soil_temp(mzg,ipa)
-         csite%fmean_sfcw_fliq  (ipa)  = csite%fmean_soil_fliq(mzg,ipa)
-      end if
-      !-----------------------------------------------------------------------------------!
-   end do
-   return
-end subroutine update_patch_thermo_fmean
-!==========================================================================================!
-!==========================================================================================!
 
 
 !==========================================================================================!
@@ -859,8 +872,7 @@ subroutine read_soil_moist_temp(cgrid)
                             , t3ple        ! ! intent(in)
    use therm_lib     , only : cmtl2uext    ! ! function
    use grid_coms     , only : nzg          & ! intent(in)
-                            , nzs          & ! intent(in)
-                            , ngrids       ! ! intent(in)
+                            , nzs          ! ! intent(in)
    use ed_therm_lib  , only : ed_grndvap   ! ! subroutine
    implicit none
    !----- Arguments -----------------------------------------------------------------------!
@@ -895,7 +907,7 @@ subroutine read_soil_moist_temp(cgrid)
    real              , parameter  :: dlat = 2.5
    !---------------------------------------------------------------------------------------!
 
-   !----- First thing, check whether the dataset exists and crash the run if it doesn´t. --!
+   !----- First thing, check whether the dataset exists and crash the run if it doesnï¿½t. --!
    inquire(file=trim(soilstate_db),exist=l1)
    if (.not.l1) then
       write (unit=*,fmt='(a)') ' Your namelist has ISOILSTATEINIT set to read the initial'
@@ -1008,7 +1020,6 @@ subroutine read_soil_moist_temp(cgrid)
                                        ,csite%soil_tempk(nzg,ipa)                          &
                                        ,csite%soil_fracliq(nzg,ipa)                        &
                                        ,csite%sfcwater_tempk(nlsw1,ipa)                    &
-                                       ,csite%sfcwater_fracliq(nlsw1,ipa)                  &
                                        ,csite%snowfac(ipa),csite%can_prss(ipa)             &
                                        ,csite%can_shv(ipa),csite%ground_shv(ipa)           &
                                        ,csite%ground_ssh(ipa),csite%ground_temp(ipa)       &
@@ -1368,3 +1379,5 @@ subroutine update_cohort_extensive_props(cpatch,aco,zco,mult)
 end subroutine update_cohort_extensive_props
 !==========================================================================================!
 !==========================================================================================!
+
+end module update_derived_props_module

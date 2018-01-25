@@ -227,9 +227,6 @@ module fuse_fiss_utils
                               , sitetype           & ! Structure
                               , patchtype          ! ! Structure
       use disturb_coms , only : min_patch_area     ! ! intent(in)
-      use ed_misc_coms , only : iqoutput           & ! intent(in)
-                              , imoutput           & ! intent(in)
-                              , idoutput           ! ! intent(in)
       implicit none
       !----- Arguments --------------------------------------------------------------------!
       type(sitetype)       , target      :: csite        ! Current site
@@ -311,14 +308,12 @@ module fuse_fiss_utils
    ! the terminate_patches subroutine, except that no patch is removed.                    !
    !---------------------------------------------------------------------------------------!
    subroutine rescale_patches(csite)
+      use update_derived_props_module
       use ed_state_vars, only : polygontype        & ! Structure
                               , sitetype           & ! Structure
                               , patchtype          ! ! Structure
       use disturb_coms , only : min_patch_area     ! ! intent(in)
-      use ed_misc_coms , only : iqoutput           & ! intent(in)
-                              , imoutput           & ! intent(in)
-                              , idoutput           ! ! intent(in)
-      use allometry    , only : size2bl            ! ! function
+      use allometry    , only : size2bl        ! ! function
       use ed_max_dims  , only : n_dist_types       & ! intent(in)
                               , n_pft              ! ! intent(in)
       
@@ -365,6 +360,7 @@ module fuse_fiss_utils
       allocate (elim_area(n_dist_types))
       elim_area (:) = 0.0
 
+      !Manfredo: inefficient: (.not. onlyone) should be checked outside the do loop
       do ipa = 1,csite%npatches
          if (csite%area(ipa) < min_patch_area .and. (.not. onlyone)) then
             ilu = csite%dist_type(ipa)
@@ -556,16 +552,12 @@ module fuse_fiss_utils
    ! to live with that and accept life is not always fair with those with limited          !
    ! computational resources.                                                              !
    !---------------------------------------------------------------------------------------!
-   subroutine fuse_cohorts(csite,ipa, green_leaf_factor, lsl, fuse_initial)
+   subroutine fuse_cohorts(csite,ipa, lsl, fuse_initial)
 
       use ed_state_vars       , only : sitetype            & ! Structure
                                      , patchtype           ! ! Structure
-      use pft_coms            , only : rho                 & ! intent(in)
-                                     , b1Ht                & ! intent(in)
-                                     , hgt_max             & ! intent(in)
-                                     , sla                 & ! intent(in)
-                                     , is_grass            & ! intent(in)
-                                     , hgt_ref             ! ! intent(in)
+      use pft_coms            , only : hgt_max             & ! intent(in)
+                                     , is_grass            ! ! intent(in)
       use fusion_fission_coms , only : fusetol_h           & ! intent(in)
                                      , fusetol             & ! intent(in)
                                      , lai_fuse_tol        & ! intent(in)
@@ -573,15 +565,12 @@ module fuse_fiss_utils
                                      , coh_tolerance_max   ! ! intent(in)
       use ed_max_dims         , only : n_pft               ! ! intent(in)
       use mem_polygons        , only : maxcohort           ! ! intent(in)
-      use canopy_layer_coms   , only : crown_mod           ! ! intent(in)
-      use allometry           , only : dbh2h               & ! function
-                                     , size2bl             ! ! function
+      use allometry           , only : size2bl         ! ! function
       use ed_misc_coms        , only : igrass              ! ! intent(in)
       implicit none
       !----- Arguments --------------------------------------------------------------------!
       type(sitetype)         , target      :: csite             ! Current site
       integer                , intent(in)  :: ipa               ! Current patch ID
-      real, dimension(n_pft) , intent(in)  :: green_leaf_factor ! 
       integer                , intent(in)  :: lsl               ! Lowest soil level
       logical                , intent(in)  :: fuse_initial      ! Initialisation step?
       !----- Local variables --------------------------------------------------------------!
@@ -738,10 +727,8 @@ module fuse_fiss_utils
                      ) then
 
                      !----- Proceed with fusion -------------------------------------------!
-                     call fuse_2_cohorts(cpatch,donc,recc,newn                             &
-                                        ,green_leaf_factor(cpatch%pft(donc))               &
-                                        ,csite%can_prss(ipa),csite%can_shv(ipa),lsl        &
-                                        ,fuse_initial)
+                     call fuse_2_cohorts(cpatch,donc,recc,csite%can_prss(ipa)              &
+                                        ,csite%can_shv(ipa),lsl,fuse_initial)
 
                      !----- Flag donating cohort as gone, so it won't be checked again. ---!
                      fuse_table(donc) = .false.
@@ -847,8 +834,8 @@ module fuse_fiss_utils
    !   This subroutine will split two cohorts if its LAI has become too large.  This is    !
    ! only necessary when we solve radiation cohort by cohort rather than layer by layer.   !
    !---------------------------------------------------------------------------------------!
-   subroutine split_cohorts(cpatch, green_leaf_factor, lsl)
-
+   subroutine split_cohorts(cpatch, green_leaf_factor)
+      use update_derived_props_module
       use ed_state_vars        , only : patchtype              & ! structure
                                       , copy_patchtype         ! ! sub-routine
       use pft_coms             , only : q                      & ! intent(in), lookup table
@@ -861,18 +848,13 @@ module fuse_fiss_utils
                                       , bl2dbh                 & ! function
                                       , bl2h                   & ! function
                                       , dbh2bd                 ! ! function
-      use ed_misc_coms         , only : iqoutput               & ! intent(in)
-                                      , imoutput               & ! intent(in)
-                                      , idoutput               & ! intent(in)
-                                      , igrass                 ! ! intent(in)
-      use canopy_layer_coms    , only : crown_mod              ! ! intent(in)
+      use ed_misc_coms         , only : igrass                 ! ! intent(in)
       implicit none
       !----- Constants --------------------------------------------------------------------!
       real                   , parameter   :: epsilon=0.0001    ! Tweak factor...
       !----- Arguments --------------------------------------------------------------------!
       type(patchtype)        , target      :: cpatch            ! Current patch
       real, dimension(n_pft) , intent(in)  :: green_leaf_factor !
-      integer                , intent(in)  :: lsl               ! Lowest soil level
       !----- Local variables --------------------------------------------------------------!
       type(patchtype)        , pointer     :: temppatch         ! Temporary patch
       logical, dimension(:)  , allocatable :: split_mask        ! Flag: split this cohort
@@ -969,7 +951,7 @@ module fuse_fiss_utils
 
                    cpatch%bleaf(inew)  = cpatch%bleaf(inew) * (1.+epsilon)
                    cpatch%dbh  (inew)  = bl2dbh(cpatch%bleaf(inew), cpatch%pft(inew))
-                   cpatch%hite (inew)  = bl2h(cpatch%bleaf(inew), cpatch%pft(inew))               
+                   cpatch%hite (inew)  = bl2h(cpatch%bleaf(inew), cpatch%pft(inew))
                else
                    !-- use bdead for trees
                    cpatch%bdead(ico)  = cpatch%bdead(ico) * (1.-epsilon)
@@ -1026,12 +1008,10 @@ module fuse_fiss_utils
    !  information from both cohorts.                                                       !
    !                                                                                       !
    !---------------------------------------------------------------------------------------!
-   subroutine fuse_2_cohorts(cpatch,donc,recc, newn,green_leaf_factor,can_prss,can_shv,lsl &
+   subroutine fuse_2_cohorts(cpatch,donc,recc,can_prss,can_shv,lsl &
                             ,fuse_initial)
       use ed_state_vars      , only : patchtype              ! ! Structure
-      use pft_coms           , only : q                      & ! intent(in), lookup table
-                                    , qsw                    & ! intent(in), lookup table
-                                    , is_grass               ! ! intent(in)
+      use pft_coms           , only : is_grass               ! ! intent(in)
       use therm_lib          , only : uextcm2tl              & ! subroutine
                                     , vpdefil                & ! subroutine
                                     , qslif                  ! ! function
@@ -1055,8 +1035,6 @@ module fuse_fiss_utils
       type(patchtype) , target     :: cpatch            ! Current patch
       integer                      :: donc              ! Donating cohort.
       integer                      :: recc              ! Receptor cohort.
-      real            , intent(in) :: newn              ! New nplant
-      real            , intent(in) :: green_leaf_factor ! Green leaf factor
       real            , intent(in) :: can_prss          ! Canopy air pressure
       real            , intent(in) :: can_shv           ! Canopy air specific humidity
       integer         , intent(in) :: lsl               ! Lowest soil level
@@ -2842,28 +2820,25 @@ module fuse_fiss_utils
    ! limited computational resources.                                                      !
    !---------------------------------------------------------------------------------------!
    subroutine fuse_patches(cgrid,ifm,fuse_initial)
+      use patch_pft_size_profile_mod
       use ed_state_vars       , only : edtype              & ! structure
                                      , polygontype         & ! structure
                                      , sitetype            & ! structure
                                      , patchtype           ! ! structure
       use fusion_fission_coms , only : ff_nhgt             & ! intent(in)
                                      , niter_patfus        & ! intent(in)
-                                     , dark_cumlai_min     & ! intent(in)
                                      , dark_cumlai_max     & ! intent(in)
                                      , dark_cumlai_mult    & ! intent(in)
                                      , sunny_cumlai_min    & ! intent(in)
-                                     , sunny_cumlai_max    & ! intent(in)
                                      , sunny_cumlai_mult   & ! intent(in)
                                      , print_fuse_details  & ! intent(in)
                                      , light_toler_min     & ! intent(in)
-                                     , light_toler_max     & ! intent(in)
                                      , light_toler_mult    & ! intent(in)
                                      , min_oldgrowth       & ! intent(in)
                                      , fuse_prefix         ! ! intent(in)
       use ed_max_dims         , only : n_pft               & ! intent(in)
                                      , str_len             ! ! intent(in)
-      use mem_polygons        , only : maxpatch            & ! intent(in)
-                                     , maxcohort           ! ! intent(in)
+      use mem_polygons        , only : maxpatch            ! ! intent(in)
       use ed_node_coms        , only : mynum               ! ! intent(in)
       use ed_misc_coms        , only : current_time        ! ! intent(in)
       use grid_coms           , only : nzg                 & ! intent(in)
@@ -3132,7 +3107,7 @@ module fuse_fiss_utils
                   !     Take an average of the patch properties of donpatch and recpatch,  !
                   ! and assign the average recpatch.                                       !
                   !------------------------------------------------------------------------!
-                  call fuse_2_patches(csite,donp,recp,nzg,nzs,cpoly%met(isi)%prss          &
+                  call fuse_2_patches(csite,donp,recp,nzg,nzs                              &
                                      ,cpoly%lsl(isi),cpoly%ntext_soil(:,isi)               &
                                      ,cpoly%green_leaf_factor(:,isi),fuse_initial          &
                                      ,elim_nplant,elim_lai)
@@ -3402,7 +3377,7 @@ module fuse_fiss_utils
                         !     Take an average of the patch properties of donpatch and      !
                         ! recpatch, and assign the average recpatch.                       !
                         !------------------------------------------------------------------!
-                        call fuse_2_patches(csite,donp,recp,nzg,nzs,cpoly%met(isi)%prss    &
+                        call fuse_2_patches(csite,donp,recp,nzg,nzs                        &
                                            ,cpoly%lsl(isi),cpoly%ntext_soil(:,isi)         &
                                            ,cpoly%green_leaf_factor(:,isi),fuse_initial    &
                                            ,elim_nplant,elim_lai)
@@ -3748,7 +3723,7 @@ module fuse_fiss_utils
                   ! properties of donpatch and recpatch, and leave the averaged values at  !
                   ! recpatch.                                                              !
                   !------------------------------------------------------------------------!
-                  call fuse_2_patches(csite,donp,recp,nzg,nzs,cpoly%met(isi)%prss          &
+                  call fuse_2_patches(csite,donp,recp,nzg,nzs                              &
                                      ,cpoly%lsl(isi),cpoly%ntext_soil(:,isi)               &
                                      ,cpoly%green_leaf_factor(:,isi),fuse_initial          &
                                      ,elim_nplant,elim_lai)
@@ -3966,8 +3941,10 @@ module fuse_fiss_utils
    !=======================================================================================!
    !   This subroutine will merge two patches into 1.                                      !
    !---------------------------------------------------------------------------------------!
-   subroutine fuse_2_patches(csite,donp,recp,mzg,mzs,prss,lsl,ntext_soil,green_leaf_factor &
+   subroutine fuse_2_patches(csite,donp,recp,mzg,mzs,lsl,ntext_soil,green_leaf_factor &
                             ,fuse_initial,elim_nplant,elim_lai)
+      use update_derived_props_module
+      use patch_pft_size_profile_mod
       use ed_state_vars      , only : sitetype              & ! Structure 
                                     , patchtype             ! ! Structure
       use soil_coms          , only : soil                  & ! intent(in), lookup table
@@ -3998,7 +3975,6 @@ module fuse_fiss_utils
       integer                , intent(in)  :: mzs               ! # of sfc. water layers
       integer, dimension(mzg), intent(in)  :: ntext_soil        ! Soil type
       real, dimension(n_pft) , intent(in)  :: green_leaf_factor ! Green leaf factor...
-      real                   , intent(in)  :: prss              ! Sfc. air density
       logical                , intent(in)  :: fuse_initial      ! Initialisation?
       real                   , intent(out) :: elim_nplant       ! Eliminated nplant 
       real                   , intent(out) :: elim_lai          ! Eliminated lai
@@ -5016,7 +4992,7 @@ module fuse_fiss_utils
             csite%dmean_sfcw_temp  (recp)  = csite%dmean_soil_temp(mzg,recp)
             csite%dmean_sfcw_fliq  (recp)  = csite%dmean_soil_fliq(mzg,recp)
          end if
-         !------------------------------------------------------------------------------------!
+         !---------------------------------------------------------------------------------!
 		end if
       end if
       !------------------------------------------------------------------------------------!
@@ -5987,9 +5963,9 @@ module fuse_fiss_utils
          ! eliminate others.                                                               !
          !---------------------------------------------------------------------------------!
          if (cpatch%ncohorts > 0 .and. maxcohort >= 0) then
-            call fuse_cohorts(csite,recp,green_leaf_factor,lsl,fuse_initial)
+            call fuse_cohorts(csite,recp,lsl,fuse_initial)
             call terminate_cohorts(csite,recp,elim_nplant,elim_lai)
-            call split_cohorts(cpatch,green_leaf_factor,lsl)
+            call split_cohorts(cpatch,green_leaf_factor)
          end if
          !---------------------------------------------------------------------------------!
       end if
@@ -6013,7 +5989,7 @@ module fuse_fiss_utils
       ! + csite%ebudget_initialstorage(recp)                                               !
       ! + csite%co2budget_initialstorage(recp)                                             !
       !------------------------------------------------------------------------------------!
-      call update_budget(csite,lsl,recp,recp)
+      call update_budget(csite,lsl,recp)
       !------------------------------------------------------------------------------------!
 
       !------------------------------------------------------------------------------------!
@@ -6031,106 +6007,6 @@ module fuse_fiss_utils
    end subroutine fuse_2_patches
    !=======================================================================================!
    !=======================================================================================!
-
-
-
-
-
-
-   !=======================================================================================!
-   !=======================================================================================!
-   subroutine patch_pft_size_profile(csite,ipa)
-      use ed_state_vars       , only : sitetype   & ! structure
-                                     , patchtype  ! ! structure
-      use fusion_fission_coms , only : ff_nhgt    & ! intent(in)
-                                     , hgt_class  ! ! intent(in)
-      use allometry           , only : size2bl    ! ! intent(in)
-      use ed_max_dims         , only : n_pft      ! ! intent(in)
-      use pft_coms            , only : hgt_min    & ! intent(in)
-                                     , is_grass   ! ! intent(in)
-      use ed_misc_coms        , only : igrass     ! ! intent(in)
-      implicit none
-      !----- Arguments --------------------------------------------------------------------!
-      type(sitetype)         , target     :: csite     ! Current site
-      integer                , intent(in) :: ipa       ! Current patch index
-      !----- Local variables --------------------------------------------------------------!
-      type(patchtype)        , pointer    :: cpatch    ! Current patch
-      integer                             :: ipft      ! PFT index
-      integer                             :: ihgt      ! Height class index
-      integer                             :: ico       ! Counters
-      real                                :: lai_pot   ! Potential LAI
-      !------------------------------------------------------------------------------------!
-
-
-      !----- Reset all bins to zero. ------------------------------------------------------!
-      do ipft=1,n_pft
-         do ihgt=1,ff_nhgt
-            csite%cumlai_profile(ipft,ihgt,ipa)=0.0
-         end do
-      end do
-      !------------------------------------------------------------------------------------!
-
-
-
-      !----- Update bins ------------------------------------------------------------------!
-      cpatch => csite%patch(ipa)
-      cohortloop: do ico = 1,cpatch%ncohorts
-
-         !----- Find the PFT class. -------------------------------------------------------!
-         ipft    = cpatch%pft(ico)
-         ihgt    = min(ff_nhgt,max(1,count(hgt_class < cpatch%hite(ico))))
-         !---------------------------------------------------------------------------------!
-
-         !---------------------------------------------------------------------------------!
-         !     Check whether this cohort is almost at the minimum height given its PFT.    !
-         ! If it is, then we will skip it.                                                 !
-         !---------------------------------------------------------------------------------!
-         if (cpatch%hite(ico) < hgt_min(ipft) + 0.2) cycle cohortloop
-         !---------------------------------------------------------------------------------!
-
-
-         !----- Find the height class. ----------------------------------------------------!
-         ihgt    = min(ff_nhgt,max(1,count(hgt_class < cpatch%hite(ico))))
-         !---------------------------------------------------------------------------------!
-
-
-         !----- Find the potential (on-allometry) leaf area index. ------------------------!
-         if (is_grass(ipft) .and. igrass==1) then
-             !--use actual bleaf for grass
-             lai_pot = cpatch%nplant(ico) * cpatch%sla(ico) * cpatch%bleaf(ico)
-         else
-             !--use dbh for trees
-             lai_pot = cpatch%nplant(ico) * cpatch%sla(ico)                                &
-                     * size2bl(cpatch%dbh(ico),cpatch%hite(ico),ipft)
-         end if
-         !---------------------------------------------------------------------------------!
-
-
-         !----- Add the potential LAI to the bin. -----------------------------------------!
-         csite%cumlai_profile(ipft,ihgt,ipa) = lai_pot                                     &
-                                             + csite%cumlai_profile(ipft,ihgt,ipa)
-         !---------------------------------------------------------------------------------!
-      end do cohortloop
-      !------------------------------------------------------------------------------------!
-
-
-
-      !----- Integrate the leaf area index from top to bottom. ----------------------------!
-      do ihgt=ff_nhgt-1,1,-1
-         do ipft=1,n_pft
-            csite%cumlai_profile(ipft,ihgt,ipa) = csite%cumlai_profile(ipft,ihgt  ,ipa)    &
-                                                + csite%cumlai_profile(ipft,ihgt+1,ipa)
-         end do
-      end do
-      !------------------------------------------------------------------------------------!
-
-      return
-   end subroutine patch_pft_size_profile
-   !=======================================================================================!
-   !=======================================================================================!
-
-
-
 
 
 
@@ -6204,6 +6080,14 @@ module fuse_fiss_utils
    end function fuse_msqu
    !=======================================================================================!
    !=======================================================================================!
+
+
 end module fuse_fiss_utils
 !==========================================================================================!
 !==========================================================================================!
+
+
+
+
+
+

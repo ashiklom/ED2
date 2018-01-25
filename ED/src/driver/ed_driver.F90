@@ -6,17 +6,18 @@
 ! known as master.                                                                         !
 !------------------------------------------------------------------------------------------!
 subroutine ed_driver()
+   use update_derived_props_module
+   use ism_hyd
+   use ed_met_driver
+   use ed_init_full_history
+   use ed_init
    use grid_coms         , only : ngrids              & ! intent(in)
                                 , time                & ! intent(inout)
                                 , timmax              ! ! intent(inout)
    use ed_state_vars     , only : allocate_edglobals  & ! sub-routine
                                 , filltab_alltypes    & ! sub-routine
                                 , edgrid_g            ! ! intent(inout)
-   use ed_misc_coms      , only : iyeara              & ! intent(in)
-                                , imontha             & ! intent(in)
-                                , idatea              & ! intent(in)
-                                , itimea              & ! intent(in)
-                                , runtype             ! ! intent(in)
+   use ed_misc_coms      , only : runtype             ! ! intent(in)
    use soil_coms         , only : alloc_soilgrid      ! ! sub-routine
    use ed_node_coms      , only : mynum               & ! intent(in)
                                 , nnodetot            & ! intent(in)
@@ -33,7 +34,6 @@ subroutine ed_driver()
    !----- Local variables. ----------------------------------------------------------------!
    character(len=12)           :: c0
    character(len=12)           :: c1
-   integer                     :: ierr
    integer                     :: ifm
    integer                     :: ping
    real                        :: t1
@@ -41,6 +41,10 @@ subroutine ed_driver()
    real                        :: w2
    real                        :: wtime_start
    logical                     :: patch_detailed
+   !----- Local variable (MPI only). ------------------------------------------------------!
+#if defined(RAMS_MPI)
+   integer                     :: ierr
+#endif
    !----- External functions. -------------------------------------------------------------!
    real             , external :: walltime    ! wall time
    !---------------------------------------------------------------------------------------!
@@ -475,8 +479,7 @@ subroutine exterminate_patches_except(keeppa)
                   write(unit=*,fmt='(a,1x,i6)') ' - NPATCHES = ',csite%npatches
                   write(unit=*,fmt='(a,1x,i6)') ' - KEEPPA   = ',keeppa
                   write(unit=*,fmt='(a)')       '-----------------------------------------'
-                  call fail_whale ('KEEPPA can''t be greater than NPATCHES'                &
-                                  ,'ed_driver.f90')
+                  call fail_whale ()
                   call fatal_error('KEEPPA can''t be greater than NPATCHES'                &
                                   ,'exterminate_patches_except','ed_driver.f90')
                end if

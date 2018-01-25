@@ -1,3 +1,6 @@
+module ism_hyd
+  contains
+
 !! Land surface model LATERAL hydrology 
 !! Subsurface hydrology based on TOPMODEL
 !! Surface runoff hydrology based on site adjacency matrix
@@ -24,536 +27,6 @@
 !==========================================================================================!
 !==========================================================================================!
 
-module mod_lsm_hyd
-contains
-!==========================================================================================!
-!==========================================================================================!
-subroutine calcWatertable(cpoly,isi,ipa)
-  ! Estimates  water table depth (meters)
-  ! For stability, constrains the rate at water table estimates can change over time
-  ! based on the variable Moist_dWT
-  ! inputs: cpoly   - current polygon
-  !         isi     - current site ID
-  !         ipa     - current patch ID
-  ! outputs: sets patch variables: 
-  !         watertable      - depth of saturated zone (m)
-  !         soil_sat_energy - energy in saturated zone 
-  !         soil_sat_water  - water volume in saturated zone
-  !         soil_sat_heat   - heat capacity of saturated zone
-  use ed_state_vars, only: polygontype,sitetype
-  use hydrology_constants
-  use hydrology_coms, only: MoistSatThresh
-  use soil_coms, only: soil,slz,dslz
-  use grid_coms, only: nzg
-  implicit none
-  type(sitetype)   , pointer :: csite
-  type(polygontype), target  :: cpoly
-  integer, intent(in) :: isi,ipa
-  
-  integer :: k            ! soil layer counter
-  integer :: nsoil        ! soil class
-  real :: fracw           ! fraction of saturation (m/m)
-
-  !!******************************************************************************!!
-  !! Compute water table depth starting at the bottom of the lowest soil layer and!!
-  !! summing over all saturated levels, defined here as levels that have more     !!
-  !! than 95% of the full moisture capacity), but accounting for any deficit      !!
-  !! in those levels.  Sum the total soil energy ( soil_energy* dz), water        !!
-  !! content (soil_water * dz), and soil heat capacity (slcpd * dz ) in order     !!
-  !! to compute a mean temperature of transported water.                          !!
-  !!******************************************************************************!!
-
-  csite => cpoly%site(isi)
-
-  !WTold = csite%watertable(ipa)
-
-  csite%watertable(ipa) = slz(cpoly%lsl(isi))   !initialize water table depth to deepest soil layer
-  csite%soil_sat_energy(ipa) = 0.0
-  csite%soil_sat_water(ipa)  = 0.0
-  csite%soil_sat_heat(ipa)   = 0.0
-
-  layerloop: do k = cpoly%lsl(isi),nzg
-     nsoil = cpoly%ntext_soil(k,isi)  !look up soil type (switched to using SITE level soils [mcd 9/30/08]
-     fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts !calculate fraction of moisture capacity
-     csite%watertable(ipa)      = csite%watertable(ipa)      + fracw *dslz(k)
-     csite%soil_sat_energy(ipa) = csite%soil_sat_energy(ipa) + csite%soil_energy(k,ipa)*dslz(k)
-     csite%soil_sat_water(ipa)  = csite%soil_sat_water(ipa)  + csite%soil_water(k,ipa)*dslz(k)
-     csite%soil_sat_heat(ipa)   = csite%soil_sat_heat(ipa)   + soil(nsoil)%slcpd*dslz(k)
-     
-     if (fracw < MoistSatThresh) exit layerloop!change from original version to go one layer up
-  end do layerloop
-  !!store watertable depth integer
-  csite%ksat(ipa) = real(max(cpoly%lsl(isi),k-1))
-
-  if(k > nzg) then
-     !!soil completely saturated, add surface water too
-     if(csite%nlev_sfcwater(ipa) >= 1) then
-        do k=1,csite%nlev_sfcwater(ipa)
-           csite%soil_sat_energy(ipa) = csite%soil_sat_energy(ipa) + csite%sfcwater_energy(k,ipa) * &
-                csite%sfcwater_mass(k,ipa)
-        enddo
-        k = csite%nlev_sfcwater(ipa)
-        csite%soil_sat_water(ipa) = csite%soil_sat_water(ipa) + csite%sfcwater_depth(k,ipa)
-        csite%watertable(ipa) = csite%watertable(ipa) + csite%sfcwater_depth(k,ipa)
-     endif
-  endif
-
-   !! check that rate of change in water table depth is reasonable
-
-   !! check that not first time and not surface water (allowed to change fast)
-   !  if(WTold .lt. 0.0 .and. cpoly%moist_tau(isi) > 0.0) then 
-        !! compute allowed rate of change
-   !     dWT = abs(Moist_dWT*dtlsm/cpoly%moist_tau(isi))
-   !     if( abs(WTold-csite%watertable(ipa)) > dWT) then
-           !! need to limit rate of change to dz
-   !        if(csite%watertable(ipa) > WTold) then
-   !           csite%watertable(ipa) = WTold+dWT
-   !        else
-   !           csite%watertable(ipa) = WTold-dWT
-   !        endif
-   !     endif
-   !  endif
-   return
-end subroutine calcWatertable
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-subroutine updateWatertableAdd(cpoly,isi,ipa,dw,sheat)
-  !! Add subsurface water to a patch
-  !! inputs: cpoly - polygon
-  !!         isi   - site ID
-  !!         ipa   - patch ID
-  !!         dw    - change in water content (m3/m2)
-  !!         sheat - heat content of added water (J/m3)
-  use ed_state_vars, only: sitetype,polygontype
-  use soil_coms, only: soil,slz,dslz,dslzi
-  use grid_coms, only: nzg
-  use therm_lib, only: uextcm2tl
-  use consts_coms, only: wdns
-  implicit none
-  type(polygontype) , target        :: cpoly
-  integer           , intent(in)    :: isi,ipa
-  real              , intent(inout) :: dw
-  real              , intent(in)    :: sheat       !heat content of water to add (J/m3)
-
-  type(sitetype)    , pointer       :: csite
-  real                              :: tempk       !water temperature (K)
-  real                              :: fracliq     !water fraction liquid (proportion)
-  integer                           :: i,k         !counters
-  integer                           :: nsoil       !soil type
-  real                              :: wcap        !available capacity for adding moisture (m)
-  real                              :: fracw       !proportion of saturation for a soil layer
-  real                              :: dw_layer    !volumetric water content added to a layer (m3/m3)
-  logical                           :: done
-
-  !!******************************************************************************!!
-  !! Return immediately if added water will be lost in round-off                  !!
-  !!******************************************************************************!!
-  if(dw .lt. tiny(1.0)) return
-
-  done = .false.
-  csite => cpoly%site(isi)
-
-  !!******************************************************************************!!
-  !! loop from lowest soil layer to the surface, adding moisture and energy       !!
-  !!******************************************************************************!!
-   layerloop: do k = cpoly%lsl(isi),nzg
-      nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
-      fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts  !calculate fraction of moisture capacity
-      if(fracw < 1.0) then
-
-         wcap = soil(nsoil)%slmsts-csite%soil_water(k,ipa)*dslz(k) !!m3/m2
-         if(dw > wcap) then
-
-            !!********************************************************************!!
-            !! layer can be saturated, add as much as we can and subtract from dw !!                   
-            !!********************************************************************!!
-            dw_layer = wcap
-            csite%soil_water(k,ipa) = soil(nsoil)%slmsts
-            dw = dw - wcap
-
-         else
-
-            !!********************************************************************!!
-            !! layer can accept all of the dw, add everything and exit the loop   !!                   
-            !!********************************************************************!!
-            dw_layer = dw
-            csite%soil_water(k,ipa) = csite%soil_water(k,ipa)+dw*dslzi(k)
-            dw = 0.0
-            done = .true.
-
-         endif
-
-         !!************************************************************************!!
-         !! update layer's soil heat based on the amount of water added            !!
-         !!************************************************************************!!
-         csite%soil_energy(k,ipa)  = csite%soil_energy(k,ipa) + dw_layer*sheat
-         if(csite%soil_energy(k,ipa) /= csite%soil_energy(k,ipa)) then
-            print*,"dw_layer",dw_layer
-            print*,"sheat",sheat
-            print*,"k= ",k," ipa= ",ipa
-            print*,"wcap",wcap," dw", dw
-            call fatal_error('Failed soil_energy sanity check in lsm_hyd' &
-                 ,'updateWatertableAdd','lsm_hyd.f90')
-         end if
-
-         !!***********************************************************************!!
-         !!  update soil temperature and liquid fraction                          !!
-         !!***********************************************************************!!
-         call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*wdns            &
-                   ,soil(nsoil)%slcpd,tempk,fracliq)
-         csite%soil_tempk(k,ipa) = tempk
-         csite%soil_fracliq(k,ipa) = fracliq
-
-         if(done) exit layerloop
-      end if
-   end do layerloop
-
-   if(.not. done) then
-      !!***************************************************************************!!
-      !! reached top layer and still more water add,  put in surface water         !!
-      !! note: sfcwater_mass units = kg/m2                                         !!
-      !!       sfcwater_energy = J/(kg H2O)                                        !!
-      !!***************************************************************************!!
-
-      if(csite%nlev_sfcwater(ipa) == 0 .or. csite%sfcwater_mass(1,ipa) < tiny(1.0)) then
-         !!currently no surface water, create as liquid water
-         csite%sfcwater_depth(1,ipa) = dw
-         csite%sfcwater_mass(1,ipa) = dw*wdns
-         csite%sfcwater_energy(1,ipa) = 0.001 * sheat
-         csite%nlev_sfcwater(ipa) = 1
-      else
-         !!fill from bottom 
-         !!assumes surface water is liquid
-         !!need to work on case where may be snow or snow/liquid mix
-
-         ! convert J/kg to J/m2
-         csite%sfcwater_energy(1,ipa) = csite%sfcwater_energy(1,ipa) * csite%sfcwater_mass(1,ipa)
-         ! still in J/m2
-         csite%sfcwater_energy(1,ipa) = csite%sfcwater_energy(1,ipa) + sheat*dw
-         ! get new mass
-         csite%sfcwater_mass(1,ipa) = csite%sfcwater_mass(1,ipa) + dw*1000.0
-         ! convert back to J/kg
-         if(csite%sfcwater_mass(1,ipa) > 1.0e-10)then
-            csite%sfcwater_energy(1,ipa) = csite%sfcwater_energy(1,ipa) / csite%sfcwater_mass(1,ipa)
-         else
-            csite%sfcwater_energy(1,ipa) = 0.0
-         end if
-         if(csite%sfcwater_energy(1,ipa) /= csite%sfcwater_energy(1,ipa))then
-            call fatal_error('Failed sfcwater_energy sanity check in lsm_hyd' &
-                 ,'updateWaterTableAdd','lsm_hyd.f90')
-         end if
-         do i= 1,csite%nlev_sfcwater(ipa)
-            csite%sfcwater_depth(i,ipa) = csite%sfcwater_depth(i,ipa) + dw
-         end do
-      end if
-   end if
-
-   return
-end subroutine updateWatertableAdd
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-subroutine updateWatertableSubtract(cpoly,isi,ipa,dz,sheat,swater)
-!! Remove subsurface water from a patch
-!! inputs: 
-!!         cpoly  - current polygon
-!!         isi    - current site ID
-!!         ipa    - current patch ID
-!!         dz     - change in water table height (meters, negative)
-!! outputs:
-!!         sheat  - heat content of removed water (J/m2?)
-!!         swater - removed water (m3/m2)
-
-   !!need to subtract water from patch
-   use hydrology_constants
-   use hydrology_coms, only: MoistSatThresh
-   use ed_state_vars,  only: polygontype, sitetype 
-   use consts_coms, only : wdns
-   use soil_coms, only: soil,slz,dslz,dslzi
-   use grid_coms, only: nzg
-   use therm_lib, only : uextcm2tl,tl2uint
-
-   implicit none
-   type(polygontype), target      :: cpoly
-   integer          , intent(in) :: ipa,isi
-   real             , intent(in)   :: dz      ! change in water table height (always negative)
-   real             , intent(out) :: sheat
-   real             , intent(out) :: swater
-
-   type(sitetype)   , pointer    :: csite
-
-   integer :: k       ! counters
-   integer :: nsoil   ! soil type
-   real    :: dzl     ! local copy of dz, safe to change 
-   real    :: wcap    ! available capacity for adding moisture (m)
-   real    :: fracw   ! proportion of saturation for a soil layer
-   real    :: dh      ! change in heat (J/m3)
-   real    :: dw      ! change in water (m3/m3)
-   real    :: fracliq ! water fraction liquid (proportion)
-   real    :: tempk   ! water temperature (K)
-   real    :: wtmp    ! water content of layer before adjustment
-   logical :: done    ! status variable to end loop early
-
-   if( dz > 0.0) then
-      write(unit=*,fmt=*) 'dz > 0 in updateWatertableSubtract',dz
-      call fatal_error('invalid dz!','updateWatertableSubtract','lsm_hyd.f90') 
-   end if
-
-   csite => cpoly%site(isi)
-
-   done = .false.
-   dzl = dz        !make local copy
-   sheat = 0.0
-   swater = 0.0
-
-   !!start by finding top of saturated layer
-   k = int(csite%ksat(ipa))
-
-   nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
-   fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts  !calculate fraction of moisture capacity
-   if(fracw > MoistSatThresh) then  !if layer above threshold, move up one
-      k = k+1
-      nsoil = cpoly%ntext_soil(k,isi)
-      fracw = csite%soil_water(k,ipa)
-   end if
-
-   if(k > nzg) then
-      !! soil completely saturated, reset to top layer
-      k = nzg
-      nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
-      fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts  !calculate fraction of moisture capacity
-   end if
-
-   !!work down from saturation layer, removing water & heat
-   do while (k >= cpoly%lsl(isi))
-      call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*1.e3,soil(nsoil)%slcpd,tempk,fracliq)
-      !capacity for layer to loose moisture (unit = meters)
-      wcap = (fracw - soil(nsoil)%soilcp/soil(nsoil)%slmsts) * dslz(k)*fracliq 
-
-      if (wcap > tiny(1.0)) then 
-         wtmp = real(csite%soil_water(k,ipa))
-         !!      if(wcap > dzl) then 
-         if(-dzl > wcap) then 
-            !!empty soil layer completely 
-            dw = -1.0*(csite%soil_water(k,ipa) - soil(nsoil)%soilcp)
-            dzl = dzl + wcap
-         else
-            !!reduce water by dz
-            dw = dzl*soil(nsoil)%slmsts*dslzi(k)
-            dzl = 0.0
-            done = .true.
-         end if
-         
-         !!update soil water
-         csite%soil_water(k,ipa) = csite%soil_water(k,ipa) + dw
-         !! error message for positive dw or soil below capacity
-         if(dw .gt. 1.0E-9 .or. (csite%soil_water(k,ipa)+1.0e-8) < soil(nsoil)%soilcp) then 
-            print*," "
-            print*,"dw = ",dw," in updateWatertableSubtract"
-            print*,dzl,wcap,k,csite%watertable(ipa),done,fracw,nsoil
-            print*,wtmp,csite%soil_water(k,ipa),soil(nsoil)%soilcp,soil(nsoil)%slmsts
-            call fatal_error ('Bad dw!','updateWatertableSubtract','lsm_hyd.f90')
-         endif
-         
-         !!update soil heat
-         dh = dw * wdns * tl2uint(tempk,1.0)
-         csite%soil_energy(k,ipa) = csite%soil_energy(k,ipa) + dh
-         sheat = sheat - dh*dslz(k)   !cumulative sum as return value
-         swater = swater - dw*dslz(k)
-         if(csite%soil_energy(k,ipa) /= csite%soil_energy(k,ipa)) then
-            call fatal_error('Failed soil_energy sanity check in lsm_hyd' &
-                 ,'updateWatertableSubtract','lsm_hyd.f90')
-         end if
-         
-         
-         !!update soil temperature
-         call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*wdns               &
-              ,soil(nsoil)%slcpd,tempk,fracliq)
-         csite%soil_tempk(k,ipa) = tempk
-         csite%soil_fracliq(k,ipa) = fracliq
-      end if
-
-      !!iterate
-      if(done .or. k == cpoly%lsl(isi)) then
-         k = 0
-      else
-         k = k-1
-         nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
-         fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts
-      endif
-   enddo
-   return
-end subroutine updateWatertableSubtract
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
-!==========================================================================================!
-!==========================================================================================!
-subroutine updateWatertableBaseflow(cpoly,isi,ipa,baseflow)
-   use ed_state_vars, only: polygontype, sitetype
-   use soil_coms, only: soil,slz,dslz,dslzi,slcons1
-   use ed_misc_coms, only: dtlsm
-   use consts_coms, only: wdns
-   use therm_lib, only : uextcm2tl,tl2uint
-   implicit none
-
-   real, parameter :: freezeCoef = 7.0        !! should probably move to the com
-   type(polygontype) , target        :: cpoly
-   integer           , intent(in)    :: isi, ipa
-   real              , intent(inout) :: baseflow !read in as mm/s
-  
-   type(sitetype)    , pointer       :: csite
-   real                              :: bf   !baseflow in water content (meters/timestep)
-   real                              :: potn_fd,wflux_fd ! potential & flux for free-drainage
-   integer                           :: nsoil,slsl
-   real                              :: tempk, fracliq, freezeCor
-
-   
-   csite => cpoly%site(isi)
-   slsl  = cpoly%lsl(isi)
-   nsoil = cpoly%ntext_soil(slsl,isi)
-   !! determine freeze
-   call uextcm2tl(csite%soil_energy(slsl,ipa),csite%soil_water(slsl,ipa)*1.e3,soil(nsoil)%slcpd,tempk,fracliq)
-   freezeCor = fracliq
-   if(freezeCor .lt. 1.0) freezeCor = 10.0**(-freezeCoef*(1.0-freezeCor))
-   
-   !! calc max free-drainage as cap to baseflow
-   !! assumes layer below is permenantly at minimal water capacity
-   slsl  = cpoly%lsl(isi)
-!   nsoil = cpoly%ntext_soil(slsl,isi)
-   potn_fd = -dslzi(slsl)+soil(nsoil)%slpots* &
-        ((soil(nsoil)%slmsts/soil(nsoil)%soilcp)**soil(nsoil)%slbs - &
-        (soil(nsoil)%slmsts/csite%soil_water(slsl,ipa))**soil(nsoil)%slbs)
-   wflux_fd = slcons1(slsl,nsoil)  &
-                 * (csite%soil_water(1,ipa)/ soil(nsoil)%slmsts)**(2. * soil(nsoil)%slbs + 3.)  &
-                 * potn_fd * freezeCor
-   bf = min(-wflux_fd,baseflow)*dtlsm*0.001
-
-   if(bf < 0.0) then
-      write (unit=*,fmt=*) "bf in wrong direction",bf
-      call fatal_error('bad bf!','updateWatertableBaseflow','lsm_hyd.f90')
-   end if
-
-   !! first, remove baseflow water and heat
-   csite%soil_water(slsl,ipa) = csite%soil_water(slsl,ipa)-bf*dslzi(slsl)
-   if(csite%soil_water(slsl,ipa) < soil(nsoil)%soilcp) then
-      write(unit=*,fmt=*) 'Bottom dry:',csite%soil_water(1,ipa),bf,soil(nsoil)%soilcp
-      bf = bf + (csite%soil_water(slsl,ipa)-soil(nsoil)%soilcp)*dslz(slsl)
-      csite%soil_water(slsl,ipa) = soil(nsoil)%soilcp
-   end if
-   csite%soil_energy(slsl,ipa) = csite%soil_energy(slsl,ipa) &
-                               - bf*wdns*tl2uint(csite%soil_tempk(slsl,ipa),1.0)
-
-   if(csite%soil_energy(slsl,ipa) /= csite%soil_energy(slsl,ipa)) then
-                    call fatal_error('Failed soil_energy sanity check in lsm_hyd' &
-                                    ,'updateWatertableBaseflow','lsm_hyd.f90')
-                 end if
-
-   baseflow = bf*1000.0/dtlsm !! reassign for return (m/step->mm/sec)
-   return
-end subroutine updateWatertableBaseflow
-!==========================================================================================!
-!==========================================================================================!
-
-!==========================================================================================!
-!==========================================================================================!
-subroutine updateHydroParms (cgrid)
-  !! Calculates hydrology parameters
-  !! Updates runoff roughness for vegetation growth
-  !! based on USGS Water-Supply Paper 2339
-  !! inputs: 
-  !! output: updates cgrid%runoff_a(:) - vector of runoff parameters
-  !! only needs to be updated after changes in cohort density/size 
-  !! (e.g. annually and/or after disturbance)
-  !! needs tables for n3,n4  
-  !! needs CWD implementation for n3
-  use ed_state_vars, only : edtype, polygontype,sitetype,patchtype
-  use hydrology_constants
-  use hydrology_coms, only: useRUNOFF, grassLAImax
-  use consts_coms, only: grav
-  use pft_coms, only: is_grass
-  implicit none
-  type(edtype)      , target  :: cgrid           ! Alias for current grid
-  type(polygontype) , pointer :: cpoly           ! Alias for current polygon
-  type(sitetype)    , pointer :: csite           ! Alias for current site
-  type(patchtype)   , pointer :: cpatch          ! Alias for current patch
-  integer                     :: ipy,isi,ipa,ico ! Polygon, site, patch and cohort counter
-  real                        :: nb              ! soil roughness
-  real                        :: n3              ! obstruction correction (e.g. CWD)
-  real                        :: n4              ! non-woody vegetation correction
-  real                        :: n0              ! total non-tree roughness
-  real                        :: beta            ! slope (degrees)
-  real                        :: sigma           ! patch 
-!  integer :: ifm ! grid counter
-
-  if(useRUNOFF == 0) return
-  write (unit=*,fmt='(a)') 'What am I doing here????'
-  !! Surface Runoff Parameterization
-  !! Parameters for Manning's Formula
-  !! based on USGS Water-Supply Paper 2339
-  !! used in the calculation v = h^(2/3)*a0/sqrt(1+a1*h^(4/3)-a2*h^(7/3)) (m/s)
-  !! only needs to be update after changes in cohort density/size 
-  !! (e.g. annually and/or after disturbance)
-
-  do ipy=1,cgrid%npolygons
-     cpoly => cgrid%polygon(ipy)
-     do isi=1,cpoly%nsites
-        csite => cpoly%site(isi)
-        !site specific parms
-        beta = cpoly%slope(isi) !slope (degrees)
-        nb   = 0.025 ! soil roughness
-        do ipa=1,csite%npatches
-           cpatch => csite%patch(ipa)
-           ! obstruction correction, approx 0.1* propr. x-section area obstructed by CWD
-           n3    = 0.0 
-           ! non-woody veg correction, approx 0.1*(grass biomass)/(max grass biomass)
-           n4    = 0.0   
-           sigma = 0.0
-           do ico=1,cpatch%ncohorts
-              if(is_grass(cpatch%pft(ico))) then
-                 !! update non-woody correction
-                 n4 = n4 + 0.01*cpatch%LAI(ico)/GrassLAImax
-              else
-                 !! update woody cross-sectional area (ft)
-                 sigma = sigma + cpatch%nplant(ico)*cpatch%DBH(ico)*m2f
-              end if
-           end do ! cohort
-           n0 = nb + n3 + n4 
-!           cp%runoff_a(1) = 1.486*m2f**(-1/3)*sqrt(tan(beta))/n0
-           csite%runoff_a(1,ipa) = m2f**(-1/3)*sqrt(tan(beta))/n0
-           csite%runoff_a(2,ipa) = c1 * m2f**(4/3)*sigma*1.49*1.49/(2.*grav*m2f*n0*n0)
-           csite%runoff_a(3,ipa) = c2 * m2f**(7/3)*sigma*1.49*1.49/(2.*grav*m2f*n0*n0)
-        end do !patch
-     end do !site 
-  end do !polygon
-!  write(unit=*,fmt=*) "END updateHydroParms"
-  return
-end subroutine updateHydroParms
-!==========================================================================================!
-!==========================================================================================!
-
-end module
-
 
 
 
@@ -573,7 +46,6 @@ subroutine initHydrology()
 
   use hydrology_constants
   use grid_coms,only: ngrids
-  use hydrology_coms, only: useTOPMODEL, useRUNOFF
   use ed_state_vars, only : edgrid_g
   use ed_node_coms, only: mynum
   implicit none
@@ -1100,6 +572,460 @@ end subroutine calcHydroSubsurface
 !!!!!!      enddo
 !!!!!!   enddo
 !!!!!! end subroutine calcHydroSubsurfaceNode
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+subroutine calcWatertable(cpoly,isi,ipa)
+  ! Estimates  water table depth (meters)
+  ! For stability, constrains the rate at water table estimates can change over time
+  ! based on the variable Moist_dWT
+  ! inputs: cpoly   - current polygon
+  !         isi     - current site ID
+  !         ipa     - current patch ID
+  ! outputs: sets patch variables: 
+  !         watertable      - depth of saturated zone (m)
+  !         soil_sat_energy - energy in saturated zone 
+  !         soil_sat_water  - water volume in saturated zone
+  !         soil_sat_heat   - heat capacity of saturated zone
+  use ed_state_vars, only: polygontype,sitetype
+  use hydrology_constants
+  use hydrology_coms, only: MoistSatThresh
+  use soil_coms, only: soil,slz,dslz
+  use grid_coms, only: nzg
+  implicit none
+  type(sitetype)   , pointer :: csite
+  type(polygontype), target  :: cpoly
+  integer, intent(in) :: isi,ipa
+  
+  integer :: k            ! soil layer counter
+  integer :: nsoil        ! soil class
+  real :: fracw           ! fraction of saturation (m/m)
+
+  !!******************************************************************************!!
+  !! Compute water table depth starting at the bottom of the lowest soil layer and!!
+  !! summing over all saturated levels, defined here as levels that have more     !!
+  !! than 95% of the full moisture capacity), but accounting for any deficit      !!
+  !! in those levels.  Sum the total soil energy ( soil_energy* dz), water        !!
+  !! content (soil_water * dz), and soil heat capacity (slcpd * dz ) in order     !!
+  !! to compute a mean temperature of transported water.                          !!
+  !!******************************************************************************!!
+
+  csite => cpoly%site(isi)
+
+  !WTold = csite%watertable(ipa)
+
+  csite%watertable(ipa) = slz(cpoly%lsl(isi))   !initialize water table depth to deepest soil layer
+  csite%soil_sat_energy(ipa) = 0.0
+  csite%soil_sat_water(ipa)  = 0.0
+  csite%soil_sat_heat(ipa)   = 0.0
+
+  layerloop: do k = cpoly%lsl(isi),nzg
+     nsoil = cpoly%ntext_soil(k,isi)  !look up soil type (switched to using SITE level soils [mcd 9/30/08]
+     fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts !calculate fraction of moisture capacity
+     csite%watertable(ipa)      = csite%watertable(ipa)      + fracw *dslz(k)
+     csite%soil_sat_energy(ipa) = csite%soil_sat_energy(ipa) + csite%soil_energy(k,ipa)*dslz(k)
+     csite%soil_sat_water(ipa)  = csite%soil_sat_water(ipa)  + csite%soil_water(k,ipa)*dslz(k)
+     csite%soil_sat_heat(ipa)   = csite%soil_sat_heat(ipa)   + soil(nsoil)%slcpd*dslz(k)
+     
+     if (fracw < MoistSatThresh) exit layerloop!change from original version to go one layer up
+  end do layerloop
+  !!store watertable depth integer
+  csite%ksat(ipa) = real(max(cpoly%lsl(isi),k-1))
+
+  if(k > nzg) then
+     !!soil completely saturated, add surface water too
+     if(csite%nlev_sfcwater(ipa) >= 1) then
+        do k=1,csite%nlev_sfcwater(ipa)
+           csite%soil_sat_energy(ipa) = csite%soil_sat_energy(ipa) + csite%sfcwater_energy(k,ipa) * &
+                csite%sfcwater_mass(k,ipa)
+        enddo
+        k = csite%nlev_sfcwater(ipa)
+        csite%soil_sat_water(ipa) = csite%soil_sat_water(ipa) + csite%sfcwater_depth(k,ipa)
+        csite%watertable(ipa) = csite%watertable(ipa) + csite%sfcwater_depth(k,ipa)
+     endif
+  endif
+
+   !! check that rate of change in water table depth is reasonable
+
+   !! check that not first time and not surface water (allowed to change fast)
+   !  if(WTold .lt. 0.0 .and. cpoly%moist_tau(isi) > 0.0) then 
+        !! compute allowed rate of change
+   !     dWT = abs(Moist_dWT*dtlsm/cpoly%moist_tau(isi))
+   !     if( abs(WTold-csite%watertable(ipa)) > dWT) then
+           !! need to limit rate of change to dz
+   !        if(csite%watertable(ipa) > WTold) then
+   !           csite%watertable(ipa) = WTold+dWT
+   !        else
+   !           csite%watertable(ipa) = WTold-dWT
+   !        endif
+   !     endif
+   !  endif
+   return
+end subroutine calcWatertable
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+subroutine updateWatertableAdd(cpoly,isi,ipa,dw,sheat)
+  !! Add subsurface water to a patch
+  !! inputs: cpoly - polygon
+  !!         isi   - site ID
+  !!         ipa   - patch ID
+  !!         dw    - change in water content (m3/m2)
+  !!         sheat - heat content of added water (J/m3)
+  use ed_state_vars, only: sitetype,polygontype
+  use soil_coms, only: soil,dslz,dslzi
+  use grid_coms, only: nzg
+  use therm_lib, only: uextcm2tl
+  use consts_coms, only: wdns
+  implicit none
+  type(polygontype) , target        :: cpoly
+  integer           , intent(in)    :: isi,ipa
+  real              , intent(inout) :: dw
+  real              , intent(in)    :: sheat       !heat content of water to add (J/m3)
+
+  type(sitetype)    , pointer       :: csite
+  real                              :: tempk       !water temperature (K)
+  real                              :: fracliq     !water fraction liquid (proportion)
+  integer                           :: i,k         !counters
+  integer                           :: nsoil       !soil type
+  real                              :: wcap        !available capacity for adding moisture (m)
+  real                              :: fracw       !proportion of saturation for a soil layer
+  real                              :: dw_layer    !volumetric water content added to a layer (m3/m3)
+  logical                           :: done
+
+  !!******************************************************************************!!
+  !! Return immediately if added water will be lost in round-off                  !!
+  !!******************************************************************************!!
+  if(dw .lt. tiny(1.0)) return
+
+  done = .false.
+  csite => cpoly%site(isi)
+
+  !!******************************************************************************!!
+  !! loop from lowest soil layer to the surface, adding moisture and energy       !!
+  !!******************************************************************************!!
+   layerloop: do k = cpoly%lsl(isi),nzg
+      nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
+      fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts  !calculate fraction of moisture capacity
+      if(fracw < 1.0) then
+
+         wcap = soil(nsoil)%slmsts-csite%soil_water(k,ipa)*dslz(k) !!m3/m2
+         if(dw > wcap) then
+
+            !!********************************************************************!!
+            !! layer can be saturated, add as much as we can and subtract from dw !!                   
+            !!********************************************************************!!
+            dw_layer = wcap
+            csite%soil_water(k,ipa) = soil(nsoil)%slmsts
+            dw = dw - wcap
+
+         else
+
+            !!********************************************************************!!
+            !! layer can accept all of the dw, add everything and exit the loop   !!                   
+            !!********************************************************************!!
+            dw_layer = dw
+            csite%soil_water(k,ipa) = csite%soil_water(k,ipa)+dw*dslzi(k)
+            dw = 0.0
+            done = .true.
+
+         endif
+
+         !!************************************************************************!!
+         !! update layer's soil heat based on the amount of water added            !!
+         !!************************************************************************!!
+         csite%soil_energy(k,ipa)  = csite%soil_energy(k,ipa) + dw_layer*sheat
+         if(csite%soil_energy(k,ipa) /= csite%soil_energy(k,ipa)) then
+            print*,"dw_layer",dw_layer
+            print*,"sheat",sheat
+            print*,"k= ",k," ipa= ",ipa
+            print*,"wcap",wcap," dw", dw
+            call fatal_error('Failed soil_energy sanity check in lsm_hyd' &
+                 ,'updateWatertableAdd','lsm_hyd.f90')
+         end if
+
+         !!***********************************************************************!!
+         !!  update soil temperature and liquid fraction                          !!
+         !!***********************************************************************!!
+         call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*wdns            &
+                   ,soil(nsoil)%slcpd,tempk,fracliq)
+         csite%soil_tempk(k,ipa) = tempk
+         csite%soil_fracliq(k,ipa) = fracliq
+
+         if(done) exit layerloop
+      end if
+   end do layerloop
+
+   if(.not. done) then
+      !!***************************************************************************!!
+      !! reached top layer and still more water add,  put in surface water         !!
+      !! note: sfcwater_mass units = kg/m2                                         !!
+      !!       sfcwater_energy = J/(kg H2O)                                        !!
+      !!***************************************************************************!!
+
+      if(csite%nlev_sfcwater(ipa) == 0 .or. csite%sfcwater_mass(1,ipa) < tiny(1.0)) then
+         !!currently no surface water, create as liquid water
+         csite%sfcwater_depth(1,ipa) = dw
+         csite%sfcwater_mass(1,ipa) = dw*wdns
+         csite%sfcwater_energy(1,ipa) = 0.001 * sheat
+         csite%nlev_sfcwater(ipa) = 1
+      else
+         !!fill from bottom 
+         !!assumes surface water is liquid
+         !!need to work on case where may be snow or snow/liquid mix
+
+         ! convert J/kg to J/m2
+         csite%sfcwater_energy(1,ipa) = csite%sfcwater_energy(1,ipa) * csite%sfcwater_mass(1,ipa)
+         ! still in J/m2
+         csite%sfcwater_energy(1,ipa) = csite%sfcwater_energy(1,ipa) + sheat*dw
+         ! get new mass
+         csite%sfcwater_mass(1,ipa) = csite%sfcwater_mass(1,ipa) + dw*1000.0
+         ! convert back to J/kg
+         if(csite%sfcwater_mass(1,ipa) > 1.0e-10)then
+            csite%sfcwater_energy(1,ipa) = csite%sfcwater_energy(1,ipa) / csite%sfcwater_mass(1,ipa)
+         else
+            csite%sfcwater_energy(1,ipa) = 0.0
+         end if
+         if(csite%sfcwater_energy(1,ipa) /= csite%sfcwater_energy(1,ipa))then
+            call fatal_error('Failed sfcwater_energy sanity check in lsm_hyd' &
+                 ,'updateWaterTableAdd','lsm_hyd.f90')
+         end if
+         do i= 1,csite%nlev_sfcwater(ipa)
+            csite%sfcwater_depth(i,ipa) = csite%sfcwater_depth(i,ipa) + dw
+         end do
+      end if
+   end if
+
+   return
+end subroutine updateWatertableAdd
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+subroutine updateWatertableSubtract(cpoly,isi,ipa,dz,sheat,swater)
+!! Remove subsurface water from a patch
+!! inputs: 
+!!         cpoly  - current polygon
+!!         isi    - current site ID
+!!         ipa    - current patch ID
+!!         dz     - change in water table height (meters, negative)
+!! outputs:
+!!         sheat  - heat content of removed water (J/m2?)
+!!         swater - removed water (m3/m2)
+
+   !!need to subtract water from patch
+   use hydrology_constants
+   use hydrology_coms, only: MoistSatThresh
+   use ed_state_vars,  only: polygontype, sitetype 
+   use consts_coms, only : wdns
+   use soil_coms, only: soil,dslz,dslzi
+   use grid_coms, only: nzg
+   use therm_lib, only : uextcm2tl,tl2uint
+
+   implicit none
+   type(polygontype), target      :: cpoly
+   integer          , intent(in) :: ipa,isi
+   real             , intent(in)   :: dz      ! change in water table height (always negative)
+   real             , intent(out) :: sheat
+   real             , intent(out) :: swater
+
+   type(sitetype)   , pointer    :: csite
+
+   integer :: k       ! counters
+   integer :: nsoil   ! soil type
+   real    :: dzl     ! local copy of dz, safe to change 
+   real    :: wcap    ! available capacity for adding moisture (m)
+   real    :: fracw   ! proportion of saturation for a soil layer
+   real    :: dh      ! change in heat (J/m3)
+   real    :: dw      ! change in water (m3/m3)
+   real    :: fracliq ! water fraction liquid (proportion)
+   real    :: tempk   ! water temperature (K)
+   real    :: wtmp    ! water content of layer before adjustment
+   logical :: done    ! status variable to end loop early
+
+   if( dz > 0.0) then
+      write(unit=*,fmt=*) 'dz > 0 in updateWatertableSubtract',dz
+      call fatal_error('invalid dz!','updateWatertableSubtract','lsm_hyd.f90') 
+   end if
+
+   csite => cpoly%site(isi)
+
+   done = .false.
+   dzl = dz        !make local copy
+   sheat = 0.0
+   swater = 0.0
+
+   !!start by finding top of saturated layer
+   k = int(csite%ksat(ipa))
+
+   nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
+   fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts  !calculate fraction of moisture capacity
+   if(fracw > MoistSatThresh) then  !if layer above threshold, move up one
+      k = k+1
+      nsoil = cpoly%ntext_soil(k,isi)
+      fracw = csite%soil_water(k,ipa)
+   end if
+
+   if(k > nzg) then
+      !! soil completely saturated, reset to top layer
+      k = nzg
+      nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
+      fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts  !calculate fraction of moisture capacity
+   end if
+
+   !!work down from saturation layer, removing water & heat
+   do while (k >= cpoly%lsl(isi))
+      call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*1.e3,soil(nsoil)%slcpd,tempk,fracliq)
+      !capacity for layer to loose moisture (unit = meters)
+      wcap = (fracw - soil(nsoil)%soilcp/soil(nsoil)%slmsts) * dslz(k)*fracliq 
+
+      if (wcap > tiny(1.0)) then 
+         wtmp = real(csite%soil_water(k,ipa))
+         !!      if(wcap > dzl) then 
+         if(-dzl > wcap) then 
+            !!empty soil layer completely 
+            dw = -1.0*(csite%soil_water(k,ipa) - soil(nsoil)%soilcp)
+            dzl = dzl + wcap
+         else
+            !!reduce water by dz
+            dw = dzl*soil(nsoil)%slmsts*dslzi(k)
+            dzl = 0.0
+            done = .true.
+         end if
+         
+         !!update soil water
+         csite%soil_water(k,ipa) = csite%soil_water(k,ipa) + dw
+         !! error message for positive dw or soil below capacity
+         if(dw .gt. 1.0E-9 .or. (csite%soil_water(k,ipa)+1.0e-8) < soil(nsoil)%soilcp) then 
+            print*," "
+            print*,"dw = ",dw," in updateWatertableSubtract"
+            print*,dzl,wcap,k,csite%watertable(ipa),done,fracw,nsoil
+            print*,wtmp,csite%soil_water(k,ipa),soil(nsoil)%soilcp,soil(nsoil)%slmsts
+            call fatal_error ('Bad dw!','updateWatertableSubtract','lsm_hyd.f90')
+         endif
+         
+         !!update soil heat
+         dh = dw * wdns * tl2uint(tempk,1.0)
+         csite%soil_energy(k,ipa) = csite%soil_energy(k,ipa) + dh
+         sheat = sheat - dh*dslz(k)   !cumulative sum as return value
+         swater = swater - dw*dslz(k)
+         if(csite%soil_energy(k,ipa) /= csite%soil_energy(k,ipa)) then
+            call fatal_error('Failed soil_energy sanity check in lsm_hyd' &
+                 ,'updateWatertableSubtract','lsm_hyd.f90')
+         end if
+         
+         
+         !!update soil temperature
+         call uextcm2tl(csite%soil_energy(k,ipa),csite%soil_water(k,ipa)*wdns               &
+              ,soil(nsoil)%slcpd,tempk,fracliq)
+         csite%soil_tempk(k,ipa) = tempk
+         csite%soil_fracliq(k,ipa) = fracliq
+      end if
+
+      !!iterate
+      if(done .or. k == cpoly%lsl(isi)) then
+         k = 0
+      else
+         k = k-1
+         nsoil = cpoly%ntext_soil(k,isi)  !look up soil type
+         fracw = csite%soil_water(k,ipa) / soil(nsoil)%slmsts
+      endif
+   enddo
+   return
+end subroutine updateWatertableSubtract
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
+!==========================================================================================!
+!==========================================================================================!
+subroutine updateWatertableBaseflow(cpoly,isi,ipa,baseflow)
+   use ed_state_vars, only: polygontype, sitetype
+   use soil_coms, only: soil,dslz,dslzi,slcons1
+   use ed_misc_coms, only: dtlsm
+   use consts_coms, only: wdns
+   use therm_lib, only : uextcm2tl,tl2uint
+   implicit none
+
+   real, parameter :: freezeCoef = 7.0        !! should probably move to the com
+   type(polygontype) , target        :: cpoly
+   integer           , intent(in)    :: isi, ipa
+   real              , intent(inout) :: baseflow !read in as mm/s
+  
+   type(sitetype)    , pointer       :: csite
+   real                              :: bf   !baseflow in water content (meters/timestep)
+   real                              :: potn_fd,wflux_fd ! potential & flux for free-drainage
+   integer                           :: nsoil,slsl
+   real                              :: tempk, fracliq, freezeCor
+
+   
+   csite => cpoly%site(isi)
+   slsl  = cpoly%lsl(isi)
+   nsoil = cpoly%ntext_soil(slsl,isi)
+   !! determine freeze
+   call uextcm2tl(csite%soil_energy(slsl,ipa),csite%soil_water(slsl,ipa)*1.e3,soil(nsoil)%slcpd,tempk,fracliq)
+   freezeCor = fracliq
+   if(freezeCor .lt. 1.0) freezeCor = 10.0**(-freezeCoef*(1.0-freezeCor))
+   
+   !! calc max free-drainage as cap to baseflow
+   !! assumes layer below is permenantly at minimal water capacity
+   slsl  = cpoly%lsl(isi)
+!   nsoil = cpoly%ntext_soil(slsl,isi)
+   potn_fd = -dslzi(slsl)+soil(nsoil)%slpots* &
+        ((soil(nsoil)%slmsts/soil(nsoil)%soilcp)**soil(nsoil)%slbs - &
+        (soil(nsoil)%slmsts/csite%soil_water(slsl,ipa))**soil(nsoil)%slbs)
+   wflux_fd = slcons1(slsl,nsoil)  &
+                 * (csite%soil_water(1,ipa)/ soil(nsoil)%slmsts)**(2. * soil(nsoil)%slbs + 3.)  &
+                 * potn_fd * freezeCor
+   bf = min(-wflux_fd,baseflow)*dtlsm*0.001
+
+   if(bf < 0.0) then
+      write (unit=*,fmt=*) "bf in wrong direction",bf
+      call fatal_error('bad bf!','updateWatertableBaseflow','lsm_hyd.f90')
+   end if
+
+   !! first, remove baseflow water and heat
+   csite%soil_water(slsl,ipa) = csite%soil_water(slsl,ipa)-bf*dslzi(slsl)
+   if(csite%soil_water(slsl,ipa) < soil(nsoil)%soilcp) then
+      write(unit=*,fmt=*) 'Bottom dry:',csite%soil_water(1,ipa),bf,soil(nsoil)%soilcp
+      bf = bf + (csite%soil_water(slsl,ipa)-soil(nsoil)%soilcp)*dslz(slsl)
+      csite%soil_water(slsl,ipa) = soil(nsoil)%soilcp
+   end if
+   csite%soil_energy(slsl,ipa) = csite%soil_energy(slsl,ipa) &
+                               - bf*wdns*tl2uint(csite%soil_tempk(slsl,ipa),1.0)
+
+   if(csite%soil_energy(slsl,ipa) /= csite%soil_energy(slsl,ipa)) then
+                    call fatal_error('Failed soil_energy sanity check in lsm_hyd' &
+                                    ,'updateWatertableBaseflow','lsm_hyd.f90')
+                 end if
+
+   baseflow = bf*1000.0/dtlsm !! reassign for return (m/step->mm/sec)
+   return
+end subroutine updateWatertableBaseflow
 !==========================================================================================!
 !==========================================================================================!
 
@@ -1879,3 +1805,81 @@ end subroutine calcHydroSurface
 
 
 
+!==========================================================================================!
+!==========================================================================================!
+subroutine updateHydroParms (cgrid)
+  !! Calculates hydrology parameters
+  !! Updates runoff roughness for vegetation growth
+  !! based on USGS Water-Supply Paper 2339
+  !! inputs: 
+  !! output: updates cgrid%runoff_a(:) - vector of runoff parameters
+  !! only needs to be updated after changes in cohort density/size 
+  !! (e.g. annually and/or after disturbance)
+  !! needs tables for n3,n4  
+  !! needs CWD implementation for n3
+  use ed_state_vars, only : edtype, polygontype,sitetype,patchtype
+  use hydrology_constants
+  use hydrology_coms, only: useRUNOFF, grassLAImax
+  use consts_coms, only: grav
+  use pft_coms, only: is_grass
+  implicit none
+  type(edtype)      , target  :: cgrid           ! Alias for current grid
+  type(polygontype) , pointer :: cpoly           ! Alias for current polygon
+  type(sitetype)    , pointer :: csite           ! Alias for current site
+  type(patchtype)   , pointer :: cpatch          ! Alias for current patch
+  integer                     :: ipy,isi,ipa,ico ! Polygon, site, patch and cohort counter
+  real                        :: nb              ! soil roughness
+  real                        :: n3              ! obstruction correction (e.g. CWD)
+  real                        :: n4              ! non-woody vegetation correction
+  real                        :: n0              ! total non-tree roughness
+  real                        :: beta            ! slope (degrees)
+  real                        :: sigma           ! patch 
+!  integer :: ifm ! grid counter
+
+  if(useRUNOFF == 0) return
+  write (unit=*,fmt='(a)') 'What am I doing here????'
+  !! Surface Runoff Parameterization
+  !! Parameters for Manning's Formula
+  !! based on USGS Water-Supply Paper 2339
+  !! used in the calculation v = h^(2/3)*a0/sqrt(1+a1*h^(4/3)-a2*h^(7/3)) (m/s)
+  !! only needs to be update after changes in cohort density/size 
+  !! (e.g. annually and/or after disturbance)
+
+  do ipy=1,cgrid%npolygons
+     cpoly => cgrid%polygon(ipy)
+     do isi=1,cpoly%nsites
+        csite => cpoly%site(isi)
+        !site specific parms
+        beta = cpoly%slope(isi) !slope (degrees)
+        nb   = 0.025 ! soil roughness
+        do ipa=1,csite%npatches
+           cpatch => csite%patch(ipa)
+           ! obstruction correction, approx 0.1* propr. x-section area obstructed by CWD
+           n3    = 0.0 
+           ! non-woody veg correction, approx 0.1*(grass biomass)/(max grass biomass)
+           n4    = 0.0   
+           sigma = 0.0
+           do ico=1,cpatch%ncohorts
+              if(is_grass(cpatch%pft(ico))) then
+                 !! update non-woody correction
+                 n4 = n4 + 0.01*cpatch%LAI(ico)/GrassLAImax
+              else
+                 !! update woody cross-sectional area (ft)
+                 sigma = sigma + cpatch%nplant(ico)*cpatch%DBH(ico)*m2f
+              end if
+           end do ! cohort
+           n0 = nb + n3 + n4 
+!           cp%runoff_a(1) = 1.486*m2f**(-1/3)*sqrt(tan(beta))/n0
+           csite%runoff_a(1,ipa) = m2f**(-1/3)*sqrt(tan(beta))/n0
+           csite%runoff_a(2,ipa) = c1 * m2f**(4/3)*sigma*1.49*1.49/(2.*grav*m2f*n0*n0)
+           csite%runoff_a(3,ipa) = c2 * m2f**(7/3)*sigma*1.49*1.49/(2.*grav*m2f*n0*n0)
+        end do !patch
+     end do !site 
+  end do !polygon
+!  write(unit=*,fmt=*) "END updateHydroParms"
+  return
+end subroutine updateHydroParms
+!==========================================================================================!
+!==========================================================================================!
+
+end module ism_hyd

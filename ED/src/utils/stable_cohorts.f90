@@ -1,5 +1,61 @@
-module mod_stable_cohorts
-contains
+module stable_cohorts
+  contains
+
+!==========================================================================================!
+!==========================================================================================!
+!     This subroutine will go through all cohorts in a polygon, and assign them as either  !
+! numerically safe or unsafe.  The idea of to use a unique test to decide which cohorts    !
+! we will solve in photosynthesis, radiation, and the energy balance (RK4 or Euler).       !
+!------------------------------------------------------------------------------------------!
+subroutine flag_stable_cohorts(cgrid)
+   use ed_state_vars         , only : edtype          & ! structure
+                                    , polygontype     & ! structure
+                                    , sitetype        & ! structure
+                                    , patchtype       ! ! structure
+   implicit none
+   !----- Arguments -----------------------------------------------------------------------!
+   type(edtype)     , target   :: cgrid         ! Current grid
+   !----- Local variables. ----------------------------------------------------------------!
+   type(polygontype), pointer  :: cpoly         ! Current polygon
+   type(sitetype)   , pointer  :: csite         ! Current site
+   type(patchtype)  , pointer  :: cpatch        ! Current patch
+   integer                     :: ipy           ! Polygon index
+   integer                     :: isi           ! Site index
+   integer                     :: ipa           ! Patch index
+   integer                     :: ico           ! Cohort index
+   !---------------------------------------------------------------------------------------!
+
+   polyloop: do ipy=1, cgrid%npolygons
+
+      cpoly => cgrid%polygon(ipy)
+      siteloop: do isi=1,cpoly%nsites
+
+         csite => cpoly%site(isi)
+         patchloop: do ipa=1,csite%npatches
+            cpatch => csite%patch(ipa)
+
+            cohortloop: do ico=1, cpatch%ncohorts
+
+               !----- Check whether we can resolve this cohort. ---------------------------!
+               call is_resolvable(csite,ipa,ico)
+               !---------------------------------------------------------------------------!
+
+            end do cohortloop
+            !------------------------------------------------------------------------------!
+         end do patchloop
+      end do siteloop
+   end do polyloop
+
+   return
+end subroutine flag_stable_cohorts
+!==========================================================================================!
+!==========================================================================================!
+
+
+
+
+
+
 !==========================================================================================!
 !==========================================================================================!
 !     This sub-routine checks whether cohort leaves and wood thermodynamics can or cannot  !
@@ -15,7 +71,6 @@ contains
 subroutine is_resolvable(csite,ipa,ico)
    use ed_state_vars , only : sitetype        & ! structure
                             , patchtype       ! ! structure
-   use phenology_coms, only : elongf_min      ! ! intent(in)
    use pft_coms      , only : veg_hcap_min    ! ! intent(in)
    use ed_max_dims   , only : n_pft           ! ! intent(in)
 
@@ -70,62 +125,4 @@ end subroutine is_resolvable
 !==========================================================================================!
 !==========================================================================================!
 
-end module mod_stable_cohorts
-
-!==========================================================================================!
-!==========================================================================================!
-!     This subroutine will go through all cohorts in a polygon, and assign them as either  !
-! numerically safe or unsafe.  The idea of to use a unique test to decide which cohorts    !
-! we will solve in photosynthesis, radiation, and the energy balance (RK4 or Euler).       !
-!------------------------------------------------------------------------------------------!
-subroutine flag_stable_cohorts(cgrid)
-   use mod_stable_cohorts
-   use ed_state_vars         , only : edtype          & ! structure
-                                    , polygontype     & ! structure
-                                    , sitetype        & ! structure
-                                    , patchtype       ! ! structure
-   implicit none
-   !----- Arguments -----------------------------------------------------------------------!
-   type(edtype)     , target   :: cgrid         ! Current grid
-   !----- Local variables. ----------------------------------------------------------------!
-   type(polygontype), pointer  :: cpoly         ! Current polygon
-   type(sitetype)   , pointer  :: csite         ! Current site
-   type(patchtype)  , pointer  :: cpatch        ! Current patch
-   integer                     :: ipy           ! Polygon index
-   integer                     :: isi           ! Site index
-   integer                     :: ipa           ! Patch index
-   integer                     :: ico           ! Cohort index
-   integer                     :: k             ! Vertical index
-   !---------------------------------------------------------------------------------------!
-
-   polyloop: do ipy=1, cgrid%npolygons
-
-      cpoly => cgrid%polygon(ipy)
-      siteloop: do isi=1,cpoly%nsites
-
-         csite => cpoly%site(isi)
-         patchloop: do ipa=1,csite%npatches
-            cpatch => csite%patch(ipa)
-
-            cohortloop: do ico=1, cpatch%ncohorts
-
-               !----- Check whether we can resolve this cohort. ---------------------------!
-               call is_resolvable(csite,ipa,ico)
-               !---------------------------------------------------------------------------!
-
-            end do cohortloop
-            !------------------------------------------------------------------------------!
-         end do patchloop
-      end do siteloop
-   end do polyloop
-
-   return
-end subroutine flag_stable_cohorts
-!==========================================================================================!
-!==========================================================================================!
-
-
-
-
-
-
+end module stable_cohorts
