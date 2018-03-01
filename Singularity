@@ -48,10 +48,12 @@ From: ubuntu:xenial
 
 %apprun ED
     echo "============= Running ED ============="
+    ulimit -s unlimited
     /ED/build/ed_2.1-opt $@
     echo "============= Done ==================="
 
 %apprun EDR
     echo "============= Running EDR ============"
+    ulimit -s unlimited
     /EDR/build/ed_2.1-opt $@
     echo "============= Done ==================="
