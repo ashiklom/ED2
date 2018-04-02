@@ -1416,7 +1416,7 @@ subroutine sfcrad_ed(cosz,cosaoi,csite,mzg,mzs,ntext_soil,ncol_soil,maxcohort,tu
          write(32,*) aln
          close(32)
 
-         open*(33,file='LAI.dat')
+         open(33,file='LAI.dat')
          write(33,*) cpatch%lai
          close(33)
 
