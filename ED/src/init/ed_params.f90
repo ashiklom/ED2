@@ -5479,7 +5479,8 @@ subroutine init_rk4_params()
    ! depending on the cohort and soil grid definitions.                                    !
    !---------------------------------------------------------------------------------------!
    rk4min_can_temp   =  1.8400d2  ! Minimum canopy    temperature               [        K]
-   rk4max_can_temp   =  3.5100d2  ! Maximum canopy    temperature               [        K]
+   !rk4max_can_temp   =  3.5100d2  ! Maximum canopy    temperature               [        K]
+   rk4max_can_temp   =  4.0000d2  ! Maximum canopy    temperature               [        K]
    rk4min_can_shv    =  1.0000d-8 ! Minimum canopy    specific humidity         [kg/kg_air]
    rk4max_can_shv    =  6.0000d-2 ! Maximum canopy    specific humidity         [kg/kg_air]
    rk4max_can_rhv    =  1.1000d0  ! Maximum canopy    relative humidity (**)    [      ---]
@@ -5488,7 +5489,8 @@ subroutine init_rk4_params()
    rk4min_soil_temp  =  1.8400d2  ! Minimum soil      temperature               [        K]
    rk4max_soil_temp  =  3.5100d2  ! Maximum soil      temperature               [        K]
    rk4min_veg_temp   =  1.8400d2  ! Minimum leaf      temperature               [        K]
-   rk4max_veg_temp   =  3.5100d2  ! Maximum leaf      temperature               [        K]
+   !rk4max_veg_temp   =  3.5100d2  ! Maximum leaf      temperature               [        K]
+   rk4max_veg_temp   =  4.0000d2  ! Maximum leaf      temperature               [        K]
    rk4min_sfcw_temp  =  1.9315d2  ! Minimum snow/pond temperature               [        K]
    rk4max_sfcw_temp  =  3.5100d2  ! Maximum snow/pond temperature               [        K]
    !.......................................................................................!
