@@ -1,19 +1,31 @@
-FROM library/ubuntu:latest
+ARG IMAGE_VERSION="local"
+ARG MAKE="make"
 
-# Update packages
-RUN apt-get -y update && apt-get -y upgrade
+FROM pecan/model-ed2-git:${IMAGE_VERSION}
 
-# Install packages
-RUN apt-get -y install gfortran make gdb libhdf5-openmpi-dev
-RUN apt-get -y install git
+RUN apt-get update && \ 
+        apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        gfortran \
+        libhdf5-dev \
+        libopenmpi-dev && \
+        rm -rf /var/lib/apt/lists/*
 
-# Copy ED2
-COPY . /ED2
+RUN mkdir -p /ed_source/build/make \
+            /ed_source/build/shell \
+            /ed_source/src
+            
+COPY ED/src/ /ed_source/src/
+COPY ED/build/make/ /ed_source/build/make
+COPY ED/build/shell /ed_source/build/shell
+COPY ED/build/install.sh /ed_source/build/
 
-# Install ED2
-RUN /bin/bash -c 'cd /ED2/ED/build; ./install.sh -k A -p ubuntu --gitoff'
+RUN cd /ed_source/build && ./install.sh -g -p docker -k A
 
-# This is the command that is run by default
-# when executing `docker run`
-CMD ["/ED2/ED/build/ed_2.1-dbg -f /edinputs/ED2IN"]
+ENV APPLICATION="./job.sh"
+ENV MODEL_TYPE="ED2"
+ENV MODEL_VERSION="develop"
+ENV RABBITMQ_QUEUE="${MODEL_TYPE}_${MODEL_VERSION}"
 
+RUN cp /ed_source/build/ed_2.1-dbg /usr/local/bin/ed2.${MODEL_VERSION}

@@ -49,6 +49,8 @@ nargs=$#
 args=$@
 #------------------------------------------------------------------------------------------#
 
+MAKE=${MAKE:-make}
+
 # Initialize vars
 CLEAN=""
 KIND=""
@@ -190,7 +192,7 @@ case ${STEP} in
    touch dependency.mk
 
    #----- Launch the compiler. ------------------------------------------------------------#
-   make OPT=${OPT} KIND_COMP=${LKIND} ${CLEAN} GIT_TAG=${GIT_TAG}
+   ${MAKE} OPT=${OPT} KIND_COMP=${LKIND} ${CLEAN} GIT_TAG=${GIT_TAG}
    make_exit_code=$?
    #---------------------------------------------------------------------------------------#
 
