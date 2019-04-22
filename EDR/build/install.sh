@@ -185,7 +185,7 @@ case ${STEP} in
    # Link to makefiles, includes, and shell scripts
    ln -sf ../make/*.mk ./
    ln -sf ../make/Makefile ./
-   ln -sf ../make/include.mk.${PLATFORM} ./include.mk
+   ln -sf ../make/include.mk.opt.ashiklom ./include.mk
    ln -sf ../../../ED/build/shell/* ./
    touch dependency.mk
 
