@@ -1,0 +1,4 @@
+#!/bin/bash
+
+TAG=${1:-$(git rev-parse --short HEAD)}
+docker build -t pecan/model-ed-$TAG:latest .
