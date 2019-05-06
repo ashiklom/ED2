@@ -62,6 +62,7 @@ ED/src/preproc/cdc2hdf/consts_coms.mod
 ED/src/preproc/cdc2hdf/hdf5_coms.mod
 ED/src/preproc/cdc2hdf/hdf5_utils.mod
 ED/src/preproc/cdc2hdf/therm_lib.mod
+ED/src/memory/c34constants.mod
 ED/src/memory/var_tables_array.f90
 ED/build/bin/Make.depend.1.old
 abarca
