@@ -1,0 +1,12 @@
+# -*- mode: dockerfile -*-
+FROM debian:jessie
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gfortran \
+        git \
+        libhdf5-dev \
+        libopenmpi-dev \
+        gdb \
+        binutils \
+        && rm -rf /var/lib/apt/lists/*
