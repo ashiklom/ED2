@@ -66,9 +66,12 @@ USE_MPIWTIME=1
 
 #----------------- gfortran on Linux -----------
 CMACH=PC_GFORTRAN
-F_COMP=mpif90
-C_COMP=mpicc 
-LOADER=mpif90
+# F_COMP=mpif90
+# C_COMP=mpicc 
+# LOADER=mpif90
+F_COMP=gfortran
+C_COMP=gcc 
+LOADER=gfortran
 ##################################### COMPILER OPTIONS #####################################
 #------------------------------------------------------------------------------------------#
 # A/B/C/D. Debugging, strictest compilation flags, lowest performance.                     #
@@ -78,13 +81,13 @@ ifeq ($(KIND_COMP),)
    KIND_COMP=E
 endif
 ifeq ($(KIND_COMP),$(filter $(KIND_COMP), A B C D))
-   F_OPTS=-g -ffree-line-length-none -fno-whole-file -O0 -fopenmp -ffpe-trap=invalid,zero,overflow -fbounds-check #-std=f2003
-   C_OPTS=-fopenmp -g -O0 -ffpe-trap=invalid,zero,overflow -fbounds-check
+   F_OPTS=-g -pg -ffree-line-length-none -fno-whole-file -O0 -ffpe-trap=invalid,zero,overflow -fbounds-check
+   C_OPTS= -g -pg -O0 -ffpe-trap=invalid,zero,overflow -fbounds-check
    LOADER_OPTS=${F_OPTS}
 endif
 ifeq ($(KIND_COMP),E)
-   F_OPTS=-g -ffree-line-length-none -fno-whole-file -O2 -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check  #-O2
-   C_OPTS=-g -O2 -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check #-O2
+   F_OPTS=-g -pg -ffree-line-length-none -fno-whole-file -O2 #-ffpe-trap=invalid,zero,overflow -fbounds-check  #-O2
+   C_OPTS=-g -pg -O2 #-ffpe-trap=invalid,zero,overflow -fbounds-check #-O2
    LOADER_OPTS=${F_OPTS}
 endif
 
@@ -104,7 +107,8 @@ MOD_EXT=mod
 MPI_PATH=
 PAR_INCS=
 PAR_LIBS=
-PAR_DEFS=-DRAMS_MPI
+# PAR_DEFS=-DRAMS_MPI
+PAR_DEFS=
 #-----------------------------------------------------------------
 
 # For IBM,HP,SGI,ALPHA,LINUX use these:
