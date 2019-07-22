@@ -1366,7 +1366,8 @@ subroutine update_cohort_plastic_trait(cpatch,ico)
 
    ipft    = cpatch%pft(ico)
 
-   if (.not. is_grass(ipft) .and. is_tropical(ipft)) then
+   if (.not. is_grass(ipft)) then
+   !if (.not. is_grass(ipft) .and. is_tropical(ipft)) then
 
        ! 1. calcualte the maximum cumulative lai above the current cohort using the
        ! current sla value
