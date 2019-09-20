@@ -28,13 +28,13 @@ BASE=$(ED_ROOT)/build/
 
 USE_HDF5=1
 
-HDF5_HOME=/usr/local/Cellar/hdf5/1.10.5
+HDF5_HOME=/usr/local/Cellar/hdf5/1.10.5_1
 HDF5_INCS=-I${HDF5_HOME}/include
 HDF5C_INCS=-I${HDF5_HOME}/include
 HDF5_LIBS=-L${HDF5_HOME}/lib -lhdf5 -lhdf5_fortran -lhdf5_hl -lz
 
 USE_COLLECTIVE_MPIO=0
- 
+
 #---------------------------------------------------------------
 
 # netCDF libraries ---------------------------------------------
@@ -58,21 +58,29 @@ USE_INTERF=1
 # the wall time (the only double-precision intrinsic).  In case
 # you don't have it, leave USE_MPIWTIME=0, in which case it will
 # use a simpler, single-precision function.
-USE_MPIWTIME=1
+# USE_MPIWTIME=1
+USE_MPIWTIME=0
 
 
 # GFORTRAN DEVELOPERS: REMOVE ffree-line-length-0
 # CODE IS INTENDED TO BE LINE WIDTH COMPLIANT WITHIN 132 
 
-MPI_HOME=/usr/local/Cellar/open-mpi/4.0.1/
 LIBEVENT_HOME=/usr/local/opt/libevent/
 
 #----------------- gfortran on Linux -----------
 CMACH=PC_GFORTRAN
-F_COMP=mpif90
+
+# # Compilers with MPI enabled
+# F_COMP=mpif90
 # C_COMP=gcc -I${MPI_HOME}/include -L${MPI_HOME}/lib -L${LIBEVENT_HOME} -lmpi
-C_COMP=mpicc
-LOADER=mpif90
+# C_COMP=mpicc
+# LOADER=mpif90
+
+# Compilers with no MPI
+F_COMP=gfortran
+C_COMP=gcc
+LOADER=gfortran
+
 ##################################### COMPILER OPTIONS #####################################
 #------------------------------------------------------------------------------------------#
 # A/B/C/D. Debugging, strictest compilation flags, lowest performance.                     #
@@ -82,13 +90,24 @@ ifeq ($(KIND_COMP),)
    KIND_COMP=E
 endif
 ifeq ($(KIND_COMP),$(filter $(KIND_COMP), A B C D))
-   F_OPTS=-g -ffree-line-length-none -fno-whole-file -O0 -fopenmp -ffpe-trap=invalid,zero,overflow -fbounds-check #-std=f2003
-   C_OPTS=-Xpreprocessor -fopenmp -g -O0 -ffpe-trap=invalid,zero,overflow -fbounds-check
+   # # With MPI
+   # F_OPTS=-g -ffree-line-length-none -fno-whole-file -O0 -fopenmp -ffpe-trap=invalid,zero,overflow -fbounds-check #-std=f2003
+   # C_OPTS=-Xpreprocessor -fopenmp -g -O0 -ffpe-trap=invalid,zero,overflow -fbounds-check
+
+   # Without MPI
+   F_OPTS=-g -ffree-line-length-none -fno-whole-file -O0 -ffpe-trap=invalid,zero,overflow -fbounds-check #-std=f2003
+   C_OPTS=-Xpreprocessor -g -O0 -ffpe-trap=invalid,zero,overflow -fbounds-check
    LOADER_OPTS=${F_OPTS}
 endif
 ifeq ($(KIND_COMP),E)
-   F_OPTS=-g -ffree-line-length-none -fno-whole-file -O2 -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check  #-O2
-   C_OPTS=-g -O2 -Xpreprocessor -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check #-O2
+   # # With MPI
+   # F_OPTS=-g -ffree-line-length-none -fno-whole-file -O2 -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check  #-O2
+   # C_OPTS=-g -O2 -Xpreprocessor -fopenmp #-ffpe-trap=invalid,zero,overflow -fbounds-check #-O2
+
+   # Without MPI
+   F_OPTS=-g -ffree-line-length-none -fno-whole-file -O2  #-ffpe-trap=invalid,zero,overflow -fbounds-check  #-O2
+   C_OPTS=-g -O2 -Xpreprocessor #-ffpe-trap=invalid,zero,overflow -fbounds-check #-O2
+
    LOADER_OPTS=${F_OPTS}
 endif
 
@@ -153,10 +172,11 @@ MOD_EXT=mod
 #-----------------------------------------------------------------
 
 #---------------If using scritps 'mpicc' e 'mpif90'---------------'
-MPI_PATH=
-PAR_INCS=
-PAR_LIBS=
-PAR_DEFS=-DRAMS_MPI
+# # Uncomment to use MPI
+# MPI_PATH=
+# PAR_INCS=
+# PAR_LIBS=
+# PAR_DEFS=-DRAMS_MPI
 #-----------------------------------------------------------------
 
 # For IBM,HP,SGI,ALPHA,LINUX use these:
