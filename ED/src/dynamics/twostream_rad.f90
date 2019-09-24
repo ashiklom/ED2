@@ -146,7 +146,7 @@ subroutine lw_two_stream(grnd_emiss4,grnd_temp4,rlong_top4,ncoh,pft,lai,wai,cai,
                     + wood_weight(i) * wood_emiss_tir(ipft) * wood_temp(i) ** 4 )          &
                   / ( leaf_weight(i) * leaf_emiss_tir(ipft)                                &
                     + wood_weight(i) * wood_emiss_tir(ipft) )
-      black(i) = cai(i) * stefan8 * temiss_four
+      black(i) = stefan8 * temiss_four
       !------------------------------------------------------------------------------------!
 
 
