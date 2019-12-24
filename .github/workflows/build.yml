@@ -27,7 +27,6 @@ jobs:
     steps:
     - name: Retrieve compiled binary
       uses: actions/download-artifact@v1
-      working-directory: ./EDTS/Templates/
       with:
         name: ed2-binary
     - name: Install dependencies
@@ -45,5 +44,5 @@ jobs:
     - name: Run ED2 at Harvard Forest
       working-directory: ./EDTS/Templates/
       run: |
-        chmod +x ed2-binary/ed_2.1-dbg
+        chmod +x ../../ed2-binary/ed_2.1-dbg
         ed2-binary/ed_2.1-dbg
