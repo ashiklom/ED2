@@ -1,0 +1,15 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubutnu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Install dependencies
+      run: sudo apt-get install -y --no-install-recommends gfortran libhdf5-dev libopenmpi-dev
+    - name: Install ED2
+      run: ./install.sh -g -p travisci -k A
