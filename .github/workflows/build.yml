@@ -15,3 +15,21 @@ jobs:
       run: |
         cd ED/build
         ./install.sh -g -p travisci -k A
+    - name: Upload compiled ED2 binary
+      uses: actions/upload-artifact@v1
+      with:
+        name: ed2-binary
+        path: ED/build/ed_2.1-dbg
+
+  test1:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Retrieve compiled binary
+      uses: actions/download-artifact@v1
+      with:
+        name: ed2-binary
+    - name: Install dependencies
+      run: sudo apt-get install -y --not-install-recommends gfortran libhdf5-openmpi-dev libopenmpi-dev
+    - name: Run ED2
+      run: ed2-binary/ed_2.1-dbg
