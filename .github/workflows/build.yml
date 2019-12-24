@@ -32,4 +32,8 @@ jobs:
     - name: Install dependencies
       run: sudo apt-get install -y --no-install-recommends gfortran libhdf5-openmpi-dev libopenmpi-dev
     - name: Run ED2
-      run: ed2-binary/ed_2.1-dbg
+      run: |
+        pwd
+        ls -al ed2-binary
+        chmod +x ed2-binary/ed_2.1-dbg
+        ed2-binary/ed_2.1-dbg
