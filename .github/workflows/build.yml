@@ -28,7 +28,7 @@ jobs:
       uses: actions/download-artifact@v1
       with:
         name: ed2-binary
-        path: $HOME/ed_2.1-dbg
+        path: ed_2.1-dbg
     - name: Install dependencies
       run: sudo apt-get install -y --no-install-recommends gfortran libhdf5-openmpi-dev libopenmpi-dev
     - name: Download common ED2 files
@@ -44,5 +44,5 @@ jobs:
     - name: Run ED2 at Harvard Forest
       working-directory: ./EDTS/Templates/
       run: |
-        chmod +x $HOME/ed_2.1-dbg
+        chmod +x /home/runner/work/ED2/ED2/ed_2.1-dbg
         ed2-binary/ed_2.1-dbg
