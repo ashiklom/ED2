@@ -3,8 +3,23 @@ name: CI
 on: [push]
 
 jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download common ED2 files
+      working-directory: ./EDTS/Templates/
+      run: |
+        wget https://github.com/ashiklom/edts-datasets/releases/download/common/common.tar.gz
+        tar -xf common.tar.gz
+    - name: Download Harvard Forest files
+      working-directory: ./EDTS/Templates/
+      run: |
+        wget https://github.com/ashiklom/edts-datasets/releases/download/harvard-forest/harvard-forest.tar.gz
+        tar -xf harvard-forest.tar.gz
+
   build:
 
+    needs: download
     runs-on: ubuntu-latest
 
     steps:
@@ -21,28 +36,18 @@ jobs:
         name: ed2-binary
         path: ED/build/ed_2.1-dbg
 
-  harvard-forest:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-    - name: Retrieve compiled binary
-      uses: actions/download-artifact@v1
-      with:
-        name: ed2-binary
-    - name: Install dependencies
-      run: sudo apt-get install -y --no-install-recommends gfortran libhdf5-openmpi-dev libopenmpi-dev
-    - name: Download common ED2 files
-      working-directory: ./EDTS/Templates/
-      run: |
-        wget https://github.com/ashiklom/edts-datasets/releases/download/common/common.tar.gz
-        tar -xf common.tar.gz
-    - name: Download Harvard Forest files
-      working-directory: ./EDTS/Templates/
-      run: |
-        wget https://github.com/ashiklom/edts-datasets/releases/download/harvard-forest/harvard-forest.tar.gz
-        tar -xf harvard-forest.tar.gz
-    - name: Run ED2 at Harvard Forest
-      working-directory: ./EDTS/Templates/
-      run: |
-        chmod +x ../../ed2-binary/ed_2.1-dbg
-        ed2-binary/ed_2.1-dbg
+  # harvard-forest:
+  #   needs: build
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Retrieve compiled binary
+  #     uses: actions/download-artifact@v1
+  #     with:
+  #       name: ed2-binary
+  #   - name: Install dependencies
+  #     run: sudo apt-get install -y --no-install-recommends gfortran libhdf5-openmpi-dev libopenmpi-dev
+  #   - name: Run ED2 at Harvard Forest
+  #     working-directory: ./EDTS/Templates/
+  #     run: |
+  #       chmod +x ../../ed2-binary/ed_2.1-dbg
+  #       ed2-binary/ed_2.1-dbg
