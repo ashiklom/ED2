@@ -44,5 +44,5 @@ jobs:
     - name: Run ED2 at Harvard Forest
       working-directory: ./EDTS/Templates/
       run: |
-        chmod +x /home/runner/work/ED2/ED2/ed_2.1-dbg
-        ed2-binary/ed_2.1-dbg
+        chmod +x "$GITHUB_WORKSPACE"/ed_2.1-dbg
+        "$GITHUB_WORKSPACE"/ed_2.1-dbg
