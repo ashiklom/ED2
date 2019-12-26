@@ -44,4 +44,5 @@ jobs:
       working-directory: ./EDTS/Templates/
       run: |
         chmod +x "$GITHUB_WORKSPACE"/ed2-binary/ed_2.1-dbg
+        ulimit -s unlimited
         OMP_NUM_THREADS=1 "$GITHUB_WORKSPACE"/ed2-binary/ed_2.1-dbg -s -f ED2IN-harvard-forest
