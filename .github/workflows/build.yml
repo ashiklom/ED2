@@ -4,7 +4,6 @@ on: [push]
 
 jobs:
   build:
-    needs: download
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
