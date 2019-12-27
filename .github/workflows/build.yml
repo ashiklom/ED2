@@ -19,7 +19,7 @@ jobs:
         name: ed2-binary
         path: ED/build/ed_2.1-dbg
 
-  test.umbs.bg:
+  test-umbs-bg:
     needs: build
     runs-on: ubuntu-latest
     steps:
