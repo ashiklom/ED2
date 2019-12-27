@@ -34,4 +34,4 @@ jobs:
       working-directory: ./EDTS/
       run: |
         chmod +x "$GITHUB_WORKSPACE"/ed2-binary/ed_2.1-dbg
-        "./run-test.sh umbs.bg $GITHUB_WORKSPACE/ed2-binary/ed_2.1-dbg"
+        ./run-test.sh umbs.bg "$GITHUB_WORKSPACE/ed2-binary/ed_2.1-dbg"
