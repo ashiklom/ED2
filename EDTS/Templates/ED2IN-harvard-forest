@@ -307,8 +307,8 @@ $ED_NL
    ! SFILOUT -- Path and prefix for history files.                                         !
    !---------------------------------------------------------------------------------------!
 
-   NL%FFILOUT = 'harvard-forest/output/harvard-forest'
-   NL%SFILOUT = 'harvard-forest/output/harvard-forest'
+   NL%FFILOUT = 'test-outputs/harvard-forest/analysis'
+   NL%SFILOUT = 'test-outputs/harvard-forest/history'
 
    !---------------------------------------------------------------------------------------!
 

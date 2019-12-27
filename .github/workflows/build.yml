@@ -19,7 +19,7 @@ jobs:
         name: ed2-binary
         path: ED/build/ed_2.1-dbg
 
-  harvard-forest:
+  test.umbs.bg:
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -30,19 +30,8 @@ jobs:
         name: ed2-binary
     - name: Install dependencies
       run: sudo apt-get install -y --no-install-recommends gfortran libhdf5-openmpi-dev libopenmpi-dev
-    - name: Download common ED2 files
-      working-directory: ./EDTS/Templates/
-      run: |
-        wget https://github.com/ashiklom/edts-datasets/releases/download/common/common.tar.gz
-        tar -xf common.tar.gz
-    - name: Download Harvard Forest files
-      working-directory: ./EDTS/Templates/
-      run: |
-        wget https://github.com/ashiklom/edts-datasets/releases/download/harvard-forest/harvard-forest.tar.gz
-        tar -xf harvard-forest.tar.gz
-    - name: Run ED2 at Harvard Forest
-      working-directory: ./EDTS/Templates/
+    - name: Run ED2
+      working-directory: ./EDTS
       run: |
         chmod +x "$GITHUB_WORKSPACE"/ed2-binary/ed_2.1-dbg
-        ulimit -s unlimited
-        OMP_NUM_THREADS=1 "$GITHUB_WORKSPACE"/ed2-binary/ed_2.1-dbg -s -f ED2IN-harvard-forest
+        "./run-test.sh umbs.bg $GITHUB_WORKSPACE/ed2-binary/ed_2.1-dbg"
