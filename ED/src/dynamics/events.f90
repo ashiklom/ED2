@@ -624,7 +624,7 @@ subroutine event_irrigate(rval8)
   implicit none
   real(kind=8),intent(in) :: rval8
 
-  real :: iwater,ienergy,fliq,soil_temp
+  real :: iwater,ienergy,fliq
   integer :: ifm,ipy,isi,ipa,k
   type(edtype), pointer :: cgrid
   type(polygontype), pointer :: cpoly
@@ -677,7 +677,7 @@ subroutine event_irrigate(rval8)
               k = csite%nlev_sfcwater(ipa)
               if(k .eq. 0) then
                  csite%sfcwater_mass(1,ipa)    = iwater
-                 csite%sfcwater_tempk(1,ipa)   = soil_temp
+                 csite%sfcwater_tempk(1,ipa)   = csite%soil_tempk(nzg,ipa)
                  csite%sfcwater_energy(1,ipa)  = ienergy
                  csite%sfcwater_depth(1,ipa)   = iwater * wdnsi
                  csite%sfcwater_fracliq(1,ipa) = fliq
