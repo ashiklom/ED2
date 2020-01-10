@@ -62,12 +62,9 @@ fi
 
 # Run without OMP.
 # TODO: Test execution with OMP
-# Try to run through a debugger for better error information.
-# First, try `gdb`, then `lldb`, and finally fall back
+# Try to run through `gdb` for better error information.
 if [ -z $ISMACOS ] && command -v gdb > /dev/null; then
     OMP_NUM_THREADS=1 gdb "$ED2EXE" -ex "run -s -f $ED2IN" | tee "$LOGFILE"
-elif [ $ISMACOS ] && command -v lldb > /dev/null; then
-    OMP_NUM_THREADS=1 lldb --batch -o run -- "$ED2EXE" -s -f "$ED2IN" | tee "$LOGFILE"
 else
     OMP_NUM_THREADS=1 "$ED2EXE" -s -f "$ED2IN" | tee "$LOGFILE"
 fi
