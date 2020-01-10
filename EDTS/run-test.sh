@@ -47,7 +47,14 @@ mkdir -p "$OUTDIR"
 mkdir -p "test-logs"
 LOGFILE="test-logs/$TESTNAME"
 
-if ! uname -a | grep -q -i "darwin"; then
+# Is this MacOS? If so:
+# (1) Don't change the stack size
+# (2) Use `lldb` instead of `gdb` for debugging
+if uname -a | grep -q -i "darwin"; then
+    ISMACOS=yes
+fi
+
+if [ -z $ISMACOS ]; then
     # Remove the stack limit. Otherwise, ED2 will mysteriously segfault early in
     # its excution. But don't do this check on MacOS.
     ulimit -s unlimited
@@ -55,7 +62,15 @@ fi
 
 # Run without OMP.
 # TODO: Test execution with OMP
-OMP_NUM_THREADS=1 "$ED2EXE" -s -f "$ED2IN" | tee "$LOGFILE"
+# Try to run through a debugger for better error information.
+# First, try `gdb`, then `lldb`, and finally fall back
+if [ -z $ISMACOS ] && command -v gdb > /dev/null; then
+    OMP_NUM_THREADS=1 gdb "$ED2EXE" -ex "run -s -f $ED2IN" | tee "$LOGFILE"
+elif [ $ISMACOS ] && command -v lldb > /dev/null; then
+    OMP_NUM_THREADS=1 lldb --batch -o run -- "$ED2EXE" -s -f "$ED2IN" | tee "$LOGFILE"
+else
+    OMP_NUM_THREADS=1 "$ED2EXE" -s -f "$ED2IN" | tee "$LOGFILE"
+fi
 
 if grep -q "Time integration ends" "$LOGFILE"; then
     echo "Run successful!"
