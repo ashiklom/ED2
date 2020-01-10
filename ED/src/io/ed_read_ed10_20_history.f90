@@ -874,6 +874,11 @@ subroutine read_ed10_ed20_history_file
                         !------------------------------------------------------------------!
 
 
+                        !----- Assign biomass of living tissues. --------------------------!
+                        cpatch%balive(ic2) = ed_balive(cpatch, ic2)
+                        !------------------------------------------------------------------!
+
+
                         !------------------------------------------------------------------!
                         !     Use allometry to define leaf and the other live biomass      !
                         ! pools.                                                           !
@@ -905,12 +910,6 @@ subroutine read_ed10_ed20_history_file
                         ! phenology after this sub-routine.                                !
                         !------------------------------------------------------------------!
                         cpatch%phenology_status(ic2) = 0
-                        !------------------------------------------------------------------!
-
-
-
-                        !----- Assign biomass of living tissues. --------------------------!
-                        cpatch%balive(ic2) = ed_balive(cpatch, ic2)
                         !------------------------------------------------------------------!
 
 
